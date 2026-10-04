@@ -15,6 +15,15 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/style.css">
+  <script>
+    // Thème clair par défaut ; le mode sombre ne s'active que via le bouton 🌙 (choix gardé sur l'appareil).
+    try {
+      if (localStorage.getItem('qdn_theme') === 'dark') {
+        document.documentElement.dataset.theme = 'dark';
+        document.querySelector('meta[name="theme-color"]').content = '#0e0719';
+      }
+    } catch (e) {}
+  </script>
 </head>
 <body>
   <div id="app"></div>

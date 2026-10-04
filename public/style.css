@@ -17,8 +17,8 @@
 }
 
 /* Mode sombre : fond plus profond, cartes nettement plus claires + bordure, pour bien délimiter. */
-@media (prefers-color-scheme: dark) {
-  :root {
+/* Mode sombre (activé par le bouton 🌙) */
+:root[data-theme="dark"] {
     --bg: #0e0719;
     --card: #1d1330;
     --text: #f7f2ff;
@@ -30,7 +30,8 @@
     --accent-text: #c4a5ff;
     --shadow: none;
   }
-}
+
+
 
 * { box-sizing: border-box; }
 
@@ -317,7 +318,9 @@ main {
 
 .pill.closed { background: #ffe8e8; color: var(--danger); }
 
-@media (prefers-color-scheme: dark) { .pill.closed { background: #4a1e2e; } }
+/* Mode sombre (activé par le bouton 🌙) */
+[data-theme="dark"] .pill.closed { background: #4a1e2e; } 
+
 
 .question { font-size: 1.3rem; font-weight: 600; line-height: 1.3; margin: 0 0 14px; word-wrap: break-word; }
 
@@ -1021,10 +1024,11 @@ body.noscroll { overflow: hidden; }
 
 .top h1 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-right: 10px; }
 
-@media (prefers-color-scheme: dark) {
-  .set-badge.spicy, .chip.spicy:not(.on) { background: #4a1530; color: #ff7ab8; }
-  .status.on { background: #133d31; }
-}
+/* Mode sombre (activé par le bouton 🌙) */
+[data-theme="dark"] .set-badge.spicy, [data-theme="dark"] .chip.spicy:not(.on) { background: #4a1530; color: #ff7ab8; }
+[data-theme="dark"] .status.on { background: #133d31; }
+
+
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
@@ -1248,19 +1252,52 @@ main { padding-top: 14px; }
 
 /* ---------- Mode sombre : quelques ajustements ---------- */
 
-@media (prefers-color-scheme: dark) {
-  .poll.todo { border-color: #ff4fae88; }
-  .btn-soft { background: var(--soft); color: var(--accent-text); border: 1px solid var(--border); }
-  .input { background: var(--soft); border-color: var(--border); }
-  .chip { color: var(--accent-text); }
-  .set-badge { color: var(--accent-text); }
-  .pill.closed { background: #3d1a2a; }
-  .bubble { background: var(--soft); }
-  .chat-input { background: var(--card); }
-  .emoji-grid button { background: var(--soft); }
-  .status.on { background: #123b30; color: #4fe0b0; }
-}
+/* Mode sombre (activé par le bouton 🌙) */
+[data-theme="dark"] .poll.todo { border-color: #ff4fae88; }
+[data-theme="dark"] .btn-soft { background: var(--soft); color: var(--accent-text); border: 1px solid var(--border); }
+[data-theme="dark"] .input { background: var(--soft); border-color: var(--border); }
+[data-theme="dark"] .chip { color: var(--accent-text); }
+[data-theme="dark"] .set-badge { color: var(--accent-text); }
+[data-theme="dark"] .pill.closed { background: #3d1a2a; }
+[data-theme="dark"] .bubble { background: var(--soft); }
+[data-theme="dark"] .chat-input { background: var(--card); }
+[data-theme="dark"] .emoji-grid button { background: var(--soft); }
+[data-theme="dark"] .status.on { background: #123b30; color: #4fe0b0; }
+
+
 
 .set-card { border: 1px solid var(--border); box-shadow: var(--shadow); }
 .set-card.spicy { border-color: transparent; }
 .strip-item.on { border: 1px solid var(--border); }
+
+/* ---------- Interrupteur clair / sombre (barre du haut) ---------- */
+
+:root { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
+
+.top h1 { flex: 1; min-width: 0; }
+.theme-btn {
+  position: relative;
+  width: 52px;
+  height: 30px;
+  border-radius: 15px;
+  background: rgba(255, 255, 255, 0.25);
+  margin-right: 10px;
+  flex-shrink: 0;
+  transition: background 0.2s;
+}
+.theme-btn.on { background: rgba(0, 0, 0, 0.35); }
+.theme-knob {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: #fff;
+  display: grid;
+  place-items: center;
+  font-size: 0.8rem;
+  transition: transform 0.2s;
+}
+.theme-btn.on .theme-knob { transform: translateX(22px); background: #2a1d43; }

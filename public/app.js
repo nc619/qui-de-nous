@@ -407,11 +407,14 @@
       $app.innerHTML = `
         <header class="top">
           <h1 id="groupTitle"></h1>
+          <button class="theme-btn" id="themeBtn" role="switch"></button>
           <button class="me-chip" id="meChip"></button>
         </header>
         <main id="view"></main>
         <nav class="nav"><div class="nav-inner" id="nav"></div></nav>`;
       document.getElementById('meChip').onclick = () => go('me');
+      document.getElementById('themeBtn').onclick = () => setTheme(isDark() ? 'light' : 'dark');
+      paintThemeBtn();
     }
     const m = me();
     document.getElementById('groupTitle').textContent = `🤔 ${state.group.name}`;
@@ -442,6 +445,28 @@
     nav.querySelectorAll('[data-tab]').forEach((b) => (b.onclick = () => go(b.dataset.tab)));
     document.title = n + unread ? `(${n + unread}) Qui de nous ?` : 'Qui de nous ?';
     if (navigator.setAppBadge) navigator.setAppBadge(n + unread).catch(() => {});
+  }
+
+  // ---------- Thème clair / sombre ----------
+
+  const isDark = () => document.documentElement.dataset.theme === 'dark';
+
+  function paintThemeBtn() {
+    const b = document.getElementById('themeBtn');
+    if (!b) return;
+    b.classList.toggle('on', isDark());
+    b.setAttribute('aria-checked', String(isDark()));
+    b.setAttribute('aria-label', isDark() ? 'Passer en mode clair' : 'Passer en mode sombre');
+    b.innerHTML = '<span class="theme-knob">' + (isDark() ? '🌙' : '☀️') + '</span>';
+  }
+
+  function setTheme(theme) {
+    if (theme === 'dark') document.documentElement.dataset.theme = 'dark';
+    else delete document.documentElement.dataset.theme;
+    save('theme', theme === 'dark' ? 'dark' : null);
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.content = theme === 'dark' ? '#0e0719' : '#7b2ff7';
+    paintThemeBtn();
   }
 
   function go(t) {
