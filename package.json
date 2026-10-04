@@ -1,0 +1,19 @@
+{
+  "name": "qui-de-nous",
+  "version": "1.0.0",
+  "description": "Sondages « Qui de nous est le plus susceptible de… » entre potes",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "optionalDependencies": {
+    "pg": "^8.12.0"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "web-push": "^3.6.7"
+  }
+}

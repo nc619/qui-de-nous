@@ -1,0 +1,15 @@
+# Configuration Render (https://render.com) : New → Blueprint → choisir ce dépôt.
+services:
+  - type: web
+    name: qui-de-nous
+    runtime: node
+    plan: free
+    region: frankfurt
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: DATABASE_URL # URL de connexion Neon (postgresql://…)
+        sync: false
+      - key: PUSH_CONTACT # ex. mailto:ton.email@exemple.com
+        sync: false
