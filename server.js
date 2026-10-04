@@ -188,7 +188,7 @@ function pv(g, p, me, now) {
 
 // Liste des discussions : le chat général, puis les sondages qui ont des messages (les plus récents d'abord).
 function chatThreads(g, me) {
-  const threads = [{ channel: 'general', ...chatSummary(g, me, 'general', 1) }];
+  const threads = [{ channel: 'general', ...chatSummary(g, me, 'general', 4) }];
   const polls = chat.channels(g.id)
     .filter((c) => c !== 'general' && g.polls[c])
     .map((c) => ({ channel: c, text: g.polls[c].text, setId: g.polls[c].setId, ...chatSummary(g, me, c, 1) }))
@@ -207,24 +207,30 @@ function markRead(g, channel, userId, seq) {
   return true;
 }
 
-// Notifications de chat : seulement pour ceux qui n'ont pas l'app ouverte, et au plus une par minute et par discussion.
-const chatPushAt = new Map();
+const short = (s, n) => (s.length > n ? s.slice(0, n - 1) + '…' : s);
+
+// Notification de message : « 💬 Alex · Chat du groupe » / « 💬 Alex · <question> ».
 function notifyChat(g, me, channel, msg) {
   const author = g.players[me.playerId];
-  const where = channel === 'general' ? g.name : g.polls[channel].text;
-  const body = msg.kind === 'gif' ? 'a envoyé un GIF 🎞️' : msg.text;
-  for (const u of Object.values(g.users)) {
-    if (u.id === me.id || u.disabled || !g.pushSubs[u.id]?.length || live.online(g.id, u.id)) continue;
-    const key = `${g.id}:${u.id}:${channel}`;
-    if (Date.now() - (chatPushAt.get(key) || 0) < 60 * 1000) continue;
-    chatPushAt.set(key, Date.now());
-    push.sendTo(g, u.id, {
-      title: `💬 ${author.name} · ${where.length > 50 ? where.slice(0, 50) + '…' : where}`,
-      body: body.length > 140 ? body.slice(0, 140) + '…' : body,
-      tag: 'chat-' + channel,
-      url: `/?chat=${channel}`,
-    }).catch(() => {});
-  }
+  const where = channel === 'general' ? 'Chat du groupe' : short(g.polls[channel].text, 60);
+  push.notify(g, 'chat', {
+    title: `💬 ${author.name} · ${where}`,
+    body: msg.kind === 'gif' ? 'A envoyé un GIF 🎞️' : short(msg.text, 160),
+    tag: 'chat-' + channel,
+    url: `/?chat=${channel}`,
+  }, me.id);
+}
+
+// Notification de vote (premier vote seulement, sans dire pour qui).
+function notifyVote(g, me, poll) {
+  const author = g.players[me.playerId];
+  const voters = Object.keys(poll.votes).length;
+  push.notify(g, 'votes', {
+    title: `🗳️ ${author.name} a voté`,
+    body: `${short(poll.text, 120)} · ${voters}/${Object.keys(g.players).length} ${voters > 1 ? 'ont' : 'a'} voté`,
+    tag: 'votes-' + poll.id,
+    url: '/',
+  }, me.id);
 }
 
 // Anti-spam : 15 messages par tranche de 10 secondes.
@@ -253,7 +259,7 @@ function stateFor(g, me, now) {
   return {
     now,
     group: { name: g.name, code: g.code },
-    me: { userId: me.id, playerId: me.playerId, isAdmin: !!me.isAdmin },
+    me: { userId: me.id, playerId: me.playerId, isAdmin: !!me.isAdmin, notif: push.prefs(me) },
     players: Object.values(g.players).sort((a, b) => a.createdAt - b.createdAt).map(publicPlayer),
     sets: Object.values(g.sets)
       .sort((a, b) => (a.spicy - b.spicy) || (b.builtin - a.builtin) || ((a.order ?? 0) - (b.order ?? 0)) || a.createdAt - b.createdAt)
@@ -434,8 +440,12 @@ async function api(req, res, url) {
     case 'PATCH /me':
       if (body.name != null) myPlayer.name = cleanName(g, body.name, myPlayer.id);
       if (body.emoji) myPlayer.emoji = cleanEmoji(body.emoji);
+      if (body.notif && typeof body.notif === 'object') {
+        me.notif = push.prefs(me);
+        for (const k of push.KINDS) if (k in body.notif) me.notif[k] = !!body.notif[k];
+      }
       persist();
-      return ok({ player: publicPlayer(myPlayer) });
+      return ok({ player: publicPlayer(myPlayer), notif: push.prefs(me) });
 
     // --- Sondages ---
     case 'POST /polls/:id/vote': {
@@ -443,9 +453,11 @@ async function api(req, res, url) {
       if (!poll) throw new HttpError(404, 'Sondage introuvable');
       if (poll.endsAt <= now) throw new HttpError(400, 'Trop tard, ce sondage est terminé ⏰');
       if (!g.players[body.playerId]) throw new HttpError(400, 'Personne inconnue');
+      const firstVote = !poll.votes[me.id];
       poll.votes[me.id] = body.playerId;
       persist();
       live.emit(g.id, 'refresh', {}, me.id);
+      if (firstVote) notifyVote(g, me, poll);
       return ok({ poll: pv(g, poll, me, now) });
     }
 

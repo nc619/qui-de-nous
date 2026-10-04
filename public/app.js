@@ -462,21 +462,24 @@
 
   // ---------- Cartes de sondage ----------
 
+  // Carte de sondage : 1) set + temps restant, 2) la question, 3) les choix ou résultats,
+  // 4) une seule ligne d'infos (+ menu ⋯), 5) l'aperçu de la discussion.
   function pollCard(p) {
     const s = setOf(p.setId);
     const voting = !p.ended && (!p.myVote || editing === p.id);
     const total = p.voterIds.length;
     const by = p.droppedBy ? player(p.droppedBy) : null;
-    const canDelete = state.me.isAdmin || p.mine;
+    const hasMenu = (!p.ended && p.myVote) || state.me.isAdmin || p.mine;
 
     let body;
     if (voting) {
-      body = `<div class="choices">${state.players
+      body = `<div class="vote-list">${state.players
         .map((u) => `
-          <button class="choice ${p.myVote === u.id ? 'picked' : ''}" data-vote="${p.id}" data-target="${u.id}">
-            ${avatar(u)}<span>${esc(u.id === state.me.playerId ? u.name + ' (moi)' : u.name)}</span>
+          <button class="vote-opt ${p.myVote === u.id ? 'picked' : ''}" data-vote="${p.id}" data-target="${u.id}">
+            ${avatar(u, 'sm')}<span>${esc(u.id === state.me.playerId ? u.name + ' (moi)' : u.name)}</span>
           </button>`)
-        .join('')}</div>`;
+        .join('')}</div>
+        ${editing === p.id ? '<button class="link-btn" data-cancel>Annuler</button>' : ''}`;
     } else {
       const counts = Object.entries(p.results || {}).sort((a, b) => b[1] - a[1]);
       const max = counts.length ? counts[0][1] : 0;
@@ -488,53 +491,72 @@
               return `
                 <div class="result ${p.myVote === id ? 'mine' : ''}">
                   <span class="bar" style="width:${pct}%;background:${esc(u.color)}"></span>
-                  ${avatar(u)}
-                  <span class="name">${esc(u.name)}</span>
-                  ${c === max ? '<span class="crown">👑</span>' : ''}
+                  ${avatar(u, 'sm')}
+                  <span class="name">${esc(u.name)}${c === max ? ' 👑' : ''}</span>
                   <span class="votes">${c}</span>
-                  <span class="pct">${pct}%</span>
                 </div>`;
             })
             .join('')}</div>`
-        : `<div class="empty" style="padding:12px">Personne n’a voté 😶</div>`;
+        : '<p class="muted small" style="margin:0">Personne n’a voté 😶</p>';
     }
 
-    const voters = p.voterIds.slice(0, 7).map((id) => avatar(player(id))).join('');
-    const actions = [];
-    if (!p.ended && p.myVote && editing !== p.id) actions.push(`<button class="btn btn-soft btn-small" data-edit="${p.id}">Changer mon vote</button>`);
-    if (editing === p.id) actions.push(`<button class="btn btn-soft btn-small" data-cancel>Annuler</button>`);
-    if (canDelete) actions.push(`<button class="btn btn-small btn-danger" data-del="${p.id}" aria-label="Supprimer">🗑️</button>`);
-
+    const status = p.ended ? 'Terminé' : `⏳ ${left(p.endsAt)}`;
     return `
-      <article class="card ${voting && !p.myVote ? 'todo' : ''}">
-        <div class="meta">
-          ${setBadge(s)}
-          <span class="pill ${p.ended ? 'closed' : ''}">${p.ended ? 'Terminé' : '⏳ ' + left(p.endsAt)}</span>
+      <article class="card poll ${voting && !p.myVote ? 'todo' : ''}">
+        <div class="poll-top">
+          <span class="poll-set ${s.spicy ? 'spicy' : ''}">${esc(s.emoji)} ${esc(s.name)}</span>
+          <span class="poll-time">${status}</span>
         </div>
         <h2 class="question">${esc(p.text)}</h2>
         ${body}
-        <div class="foot">
-          <div class="voters">
-            ${total ? `<span class="stack">${voters}</span>` : ''}
-            <span>${total}/${state.players.length} ${total > 1 ? 'ont voté' : 'a voté'}</span>
-          </div>
-          ${actions.join('')}
+        <div class="poll-foot">
+          <span>${total}/${state.players.length} ${total > 1 ? 'ont voté' : 'a voté'} · ${by ? esc(by.name) : 'drop auto'} · ${ago(p.startsAt)}</span>
+          ${hasMenu ? `<button class="more-btn" data-more="${p.id}" aria-label="Options">⋯</button>` : ''}
         </div>
-        <div class="byline">${by ? `Lancée par ${esc(by.name)}` : '🎲 Drop auto'} · ${ago(p.startsAt)}</div>
         ${pollChatPreview(p)}
       </article>`;
   }
 
   function pollChatPreview(p) {
     const c = p.chat || { count: 0, unread: 0, last: [] };
+    if (!c.count) return `<button class="poll-chat" data-chat="${p.id}"><span class="pc-ico">💬</span><span class="pc-body muted">Commenter…</span></button>`;
     const lines = c.last.map((m) => {
       const u = player(m.playerId);
-      return `<div class="pc-line">${avatar(u, 'xs')}<b>${esc(u.name)}</b><span>${m.kind === 'gif' ? '🎞️ GIF' : esc(m.text)}</span></div>`;
+      const who = m.playerId === state.me.playerId ? 'Toi' : esc(u.name);
+      return `<span class="pc-msg"><b>${who}</b> ${m.deleted ? '<i>supprimé</i>' : m.kind === 'gif' ? '🎞️ GIF' : esc(m.text)}</span>`;
     }).join('');
-    const label = c.count
-      ? `💬 ${c.count > 2 ? `Voir les ${c.count} messages` : 'Répondre'}${c.unread ? ` <span class="pc-new">${c.unread} nouveau${c.unread > 1 ? 'x' : ''}</span>` : ''}`
-      : '💬 Commenter';
-    return `<button class="poll-chat" data-chat="${p.id}">${lines}<span class="pc-open">${label}</span></button>`;
+    return `
+      <button class="poll-chat" data-chat="${p.id}">
+        <span class="pc-ico">💬</span>
+        <span class="pc-body">${lines}</span>
+        <span class="pc-count ${c.unread ? 'new' : ''}">${c.unread || c.count}</span>
+      </button>`;
+  }
+
+  function openPollMenu(id) {
+    const p = findPoll(id);
+    if (!p) return;
+    const canDelete = state.me.isAdmin || p.mine;
+    openSheet(`
+      <div class="sheet-head"><h2>Options</h2><button class="x" data-close>✕</button></div>
+      <p class="muted" style="margin:0 0 12px">${esc(p.text)}</p>
+      <div class="menu-list">
+        ${!p.ended && p.myVote ? '<button class="menu-item" id="mEdit">✏️ Changer mon vote</button>' : ''}
+        ${canDelete ? '<button class="menu-item danger" id="mDel">🗑️ Supprimer le sondage</button>' : ''}
+      </div>`, (root) => {
+      const ed = root.querySelector('#mEdit');
+      if (ed) ed.onclick = () => { closeSheet(); editing = id; renderView(); };
+      action(root.querySelector('#mDel'), async () => {
+        if (!confirm('Supprimer ce sondage pour tout le monde ?')) return;
+        await api('DELETE', `polls/${id}`);
+        closeSheet();
+        state.live = state.live.filter((x) => x.id !== id);
+        state.archive = state.archive.filter((x) => x.id !== id);
+        if (archiveExtra) archiveExtra.items = archiveExtra.items.filter((x) => x.id !== id);
+        toast('Sondage supprimé');
+        renderMain();
+      });
+    });
   }
 
   function bindPollCards(view, list) {
@@ -554,19 +576,8 @@
       };
     });
     view.querySelectorAll('[data-chat]').forEach((b) => (b.onclick = () => openChat(b.dataset.chat)));
-    view.querySelectorAll('[data-edit]').forEach((b) => (b.onclick = () => { editing = b.dataset.edit; renderView(); }));
+    view.querySelectorAll('[data-more]').forEach((b) => (b.onclick = () => openPollMenu(b.dataset.more)));
     view.querySelectorAll('[data-cancel]').forEach((b) => (b.onclick = () => { editing = null; renderView(); }));
-    view.querySelectorAll('[data-del]').forEach((b) => {
-      action(b, async () => {
-        if (!confirm('Supprimer ce sondage pour tout le monde ?')) return;
-        await api('DELETE', `polls/${b.dataset.del}`);
-        state.live = state.live.filter((p) => p.id !== b.dataset.del);
-        state.archive = state.archive.filter((p) => p.id !== b.dataset.del);
-        if (archiveExtra) archiveExtra.items = archiveExtra.items.filter((p) => p.id !== b.dataset.del);
-        toast('Sondage supprimé');
-        renderMain();
-      });
-    });
   }
 
   function replacePoll(poll) {
@@ -580,8 +591,8 @@
   function liveSwitch() {
     return `
       <div class="seg live-seg">
-        <button type="button" data-live="live" class="${liveMode === 'live' ? 'on' : ''}">⏳ En cours${state.live.length ? ` (${state.live.length})` : ''}</button>
-        <button type="button" data-live="archive" class="${liveMode === 'archive' ? 'on' : ''}">📜 Archives</button>
+        <button type="button" data-live="live" class="${liveMode === 'live' ? 'on' : ''}">En cours${state.live.length ? ` · ${state.live.length}` : ''}</button>
+        <button type="button" data-live="archive" class="${liveMode === 'archive' ? 'on' : ''}">Archives</button>
       </div>`;
   }
 
@@ -605,18 +616,15 @@
     view.innerHTML = `
       ${installBanner()}
       ${liveSwitch()}
-      <div class="next-drop">
-        <span>⏰ ${next}</span>
-        <span class="muted">${plural(state.remainingQuestions, 'question')} en réserve</span>
-      </div>
+      <p class="next-line">⏰ ${next} · ${plural(state.remainingQuestions, 'question')} en réserve</p>
       ${!state.live.length ? `
         <div class="card empty">
           <span class="big">🦗</span>
-          Rien à voter pour l’instant…<br>Lance une question si tu t’ennuies !
+          Rien à voter pour l’instant…<br>Lance une question avec le ＋ si tu t’ennuies !
         </div>` : ''}
-      ${todo.length ? `<div class="section-title">🔥 À toi de voter <span class="count">${todo.length}</span></div>${todo.map(pollCard).join('')}` : ''}
-      ${!todo.length && done.length ? `<div class="card empty" style="padding:18px"><span class="big" style="font-size:2rem">😌</span>Tu as voté partout.</div>` : ''}
-      ${done.length ? `<div class="section-title">⏳ En cours <span class="count">${done.length}</span></div>${done.map(pollCard).join('')}` : ''}
+      ${todo.length ? `<div class="section-title">À toi de voter <span class="count">${todo.length}</span></div>${todo.map(pollCard).join('')}` : ''}
+      ${!todo.length && done.length ? '<p class="all-done">😌 Tu as voté partout.</p>' : ''}
+      ${done.length ? `<div class="section-title">Déjà voté <span class="count">${done.length}</span></div>${done.map(pollCard).join('')}` : ''}
       <button class="fab" id="fab" aria-label="Lancer une question">＋</button>`;
 
     bindPollCards(view);
@@ -936,7 +944,7 @@
         ${state.players.map((u) => `<button class="strip-item ${u.id === pid ? 'on' : ''}" data-player="${u.id}">${avatar(u)}<span>${esc(u.name)}</span></button>`).join('')}
       </div>
       <div class="card radar-card">
-        <div class="radar-title">${avatar(p)}<div><b>${esc(p.name)}</b><div class="muted small">A reçu des votes dans ${plural(ps.polls, 'sondage')} terminé${ps.polls > 1 ? 's' : ''}</div></div></div>
+        <div class="radar-title">${avatar(p)}<div><b>${esc(p.name)}</b>${ps.polls ? `<div class="muted small">A reçu des votes dans ${plural(ps.polls, 'sondage')} terminé${ps.polls > 1 ? 's' : ''}</div>` : ''}</div></div>
         ${anyData ? window.radarSvg(defs, ps.value, p.color, active.length > 1 ? avg : null) : '<div class="empty">📊<br>Les stats arrivent quand les premiers sondages se terminent.</div>'}
         ${anyData && active.length > 1 ? '<div class="legend"><span class="dash"></span> moyenne du groupe</div>' : ''}
         ${myTitles.length ? `<div class="title-chips">${myTitles.map((t) => `<span class="title-chip ${t.low ? 'low' : ''}">${t.emoji} ${esc(t.title)}</span>`).join('')}</div>` : ''}
@@ -950,8 +958,7 @@
         <div class="card titles-board">${st.titles.map((t) => `
           <div class="title-row">${avatar(player(t.playerId), 'sm')}<span class="name">${esc(player(t.playerId).name)}</span><span class="title-chip ${t.low ? 'low' : ''}">${t.emoji} ${esc(t.title)}</span></div>`).join('')}
         </div>` : ''}
-      <div class="section-title">📊 Classements</div>
-      ${defs.map(ranking).join('')}`;
+      ${anyData ? `<div class="section-title">📊 Classements</div>${defs.map(ranking).join('')}` : ''}`;
 
     view.querySelectorAll('[data-player]').forEach((b) => (b.onclick = () => { statsPlayer = b.dataset.player; renderView(); }));
   }
@@ -995,6 +1002,10 @@
         <p class="muted small" id="pushStatus">…</p>
         ${iOS && !standalone ? '<div class="info">Sur iPhone : touche <b>Partager</b> → <b>Sur l’écran d’accueil</b>, puis ouvre l’app depuis l’icône pour activer les notifs.</div>' : ''}
         <button class="btn btn-main btn-block" id="pushBtn" ${pushOk ? '' : 'disabled'}>Activer les notifs</button>
+        <div class="notif-prefs">
+          ${[['polls', '🗳️ Nouvelles questions'], ['votes', '✅ Quand quelqu’un vote'], ['chat', '💬 Messages']].map(([k, label]) => `
+            <label class="switch-row"><span>${label}</span><input type="checkbox" class="switch" data-notif="${k}" ${state.me.notif[k] ? 'checked' : ''}></label>`).join('')}
+        </div>
       </div>
 
       ${state.me.isAdmin ? adminHtml() : ''}
@@ -1015,6 +1026,17 @@
       } catch (e) { toast(e.message); }
     });
     setupPushButton(pushOk);
+    view.querySelectorAll('[data-notif]').forEach((el) => {
+      el.onchange = async () => {
+        try {
+          const { notif } = await api('PATCH', 'me', { notif: { [el.dataset.notif]: el.checked } });
+          state.me.notif = notif;
+        } catch (e) {
+          el.checked = !el.checked;
+          toast(e.message);
+        }
+      };
+    });
     document.getElementById('inviteBtn').onclick = () => showInvite(false);
     action(document.getElementById('logout'), async () => {
       try { await api('POST', 'logout'); } catch { /* déjà déconnecté */ }
@@ -1266,10 +1288,28 @@
           ${t.unread ? `<span class="thread-badge">${t.unread}</span>` : ''}
         </span>
       </button>`;
+    // Le chat du groupe en grand : les 4 derniers messages, un clic pour l'ouvrir.
+    const mini = general.last.map((m) => {
+      const mine = m.playerId === state.me.playerId;
+      const u = player(m.playerId);
+      const text = m.deleted ? '<i>message supprimé</i>' : m.kind === 'gif' ? '🎞️ GIF' : esc(m.text);
+      return `
+        <div class="mini-msg ${mine ? 'mine' : ''}">
+          ${mine ? '' : avatar(u, 'xs')}
+          <div class="mini-body">${mine ? '' : `<span class="mini-name">${esc(u.name)}</span>`}<span class="mini-bubble">${text}</span></div>
+        </div>`;
+    }).join('');
+
     view.innerHTML = `
-      <div class="section-title" style="margin-top:4px">💬 Le groupe</div>
-      <div class="card threads">${row(general, 'Chat du groupe', '👥')}</div>
-      <div class="section-title">🗳️ Sur les sondages</div>
+      <button class="card group-chat" data-thread="general">
+        <div class="gc-head">
+          <span class="gc-title">👥 Chat du groupe</span>
+          ${general.unread ? `<span class="thread-badge">${general.unread}</span>` : general.last.length ? `<span class="small muted">${ago(general.last[general.last.length - 1].at)}</span>` : ''}
+        </div>
+        <div class="gc-msgs">${mini || '<p class="muted small" style="margin:8px 0">Aucun message pour l’instant. Dis bonjour 👋</p>'}</div>
+        <div class="gc-input">Écrire un message…</div>
+      </button>
+      <div class="section-title">Discussions des sondages</div>
       ${others.length
         ? `<div class="card threads">${others.map((t) => row(t, esc(t.text), esc(setOf(t.setId).emoji))).join('')}</div>`
         : '<div class="card empty" style="padding:18px">Les discussions sur les questions apparaîtront ici.<br>Commente un sondage depuis l’onglet Live 💬</div>'}`;

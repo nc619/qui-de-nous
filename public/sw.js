@@ -13,6 +13,8 @@ self.addEventListener('push', (event) => {
     self.registration.showNotification(data.title || 'Qui de nous ? 🤔', {
       body: data.body || 'Nouvelle question !',
       tag: data.tag,
+      renotify: !!data.tag, // une notif qui remplace la précédente (même discussion) sonne quand même
+      timestamp: Date.now(),
       icon: '/icon-192.png',
       badge: '/icon-192.png',
       data: { url: data.url || '/' },
