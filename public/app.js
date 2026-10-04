@@ -26,6 +26,10 @@
   let pollTimer = null;
   let swReg = null;
   let inviteCode = new URLSearchParams(location.search).get('code');
+  const openPolls = new Set(); // sondages déjà votés / archivés dépliés par l'utilisateur
+  let animating = false; // animation de vote en cours
+  let pendingRender = false;
+  let flashId = null; // ligne à faire briller après l'animation
 
   // ---------- Utilitaires ----------
 
@@ -63,6 +67,8 @@
     sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
     moon: '<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/>',
     pen: '<path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>',
+    check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+    down: '<path d="M6 9l6 6 6-6"/>',
   };
   function icon(name, cls = '') {
     return `<svg class="ico-svg ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ''}</svg>`;
@@ -447,7 +453,10 @@
     }
     const m = me();
     document.getElementById('groupTitle').textContent = state.group.name;
-    document.getElementById('meChip').innerHTML = `${avatar(m)}<span>${esc(m.name)}</span>`;
+    const chip = document.getElementById('meChip');
+    chip.innerHTML = avatar(m);
+    chip.setAttribute('aria-label', m.name);
+    chip.title = m.name;
     renderNav();
     renderView();
   }
@@ -511,6 +520,8 @@
   function renderView() {
     const view = document.getElementById('view');
     if (!view) return;
+    // Pendant l'animation d'un vote, on ne redessine pas l'écran (on le fera juste après).
+    if (animating) { pendingRender = true; return; }
     ({ live: renderLive, chat: renderChatList, sets: renderSets, stats: renderStats, me: renderMe }[tab] || renderLive)(view);
   }
 
@@ -518,12 +529,15 @@
 
   // Carte de sondage : 1) set + temps restant, 2) la question, 3) les choix ou résultats,
   // 4) une seule ligne d'infos (+ menu ⋯), 5) l'aperçu de la discussion.
-  function pollCard(p) {
+  // opts.collapsible : carte dépliée depuis une ligne compacte (on peut la replier).
+  // opts.justVoted : affichée juste après un vote, pendant l'animation.
+  function pollCard(p, opts = {}) {
     const s = setOf(p.setId);
     const voting = !p.ended && (!p.myVote || editing === p.id);
     const total = p.voterIds.length;
     const by = p.droppedBy ? player(p.droppedBy) : null;
     const hasMenu = (!p.ended && p.myVote) || state.me.isAdmin || p.mine;
+    const comments = (p.chat && p.chat.count) || 0;
 
     let body;
     if (voting) {
@@ -562,26 +576,65 @@
 
     const status = p.ended ? 'Terminé' : `encore ${left(p.endsAt)}`;
     const author = p.custom && p.authorId ? player(p.authorId) : null;
+    const picked = opts.justVoted && p.myVote ? player(p.myVote) : null;
     return `
-      <article class="card poll ${voting && !p.myVote ? 'todo' : ''} ${p.custom ? 'custom' : ''}">
+      <article class="card poll ${voting && !p.myVote ? 'todo' : ''} ${p.custom ? 'custom' : ''} ${opts.justVoted ? 'just-voted' : ''}" data-poll="${p.id}">
         ${p.custom ? `<div class="custom-tag">${icon('pen')}<span>Question de <b>${author ? esc(author.name) : 'quelqu’un du groupe'}</b></span></div>` : ''}
-        <div class="poll-top">
-          <span class="poll-set ${s.spicy ? 'spicy' : ''}">${esc(s.name)}${s.spicy ? ' · 18+' : ''}</span>
-          <span class="poll-time">${status}</span>
+        ${picked ? `<div class="voted-banner">${icon('check')}<span>Tu as voté <b>${esc(picked.id === state.me.playerId ? 'pour toi' : picked.name)}</b></span></div>` : ''}
+        <div class="poll-head" ${opts.collapsible ? `data-toggle="${p.id}" role="button" aria-expanded="true"` : ''}>
+          <div class="poll-top">
+            <span class="poll-set ${s.spicy ? 'spicy' : ''}">${esc(s.name)}${s.spicy ? ' · 18+' : ''}</span>
+            <span class="poll-time">${status}${opts.collapsible ? `<span class="fold">${icon('down')}</span>` : ''}</span>
+          </div>
+          <h2 class="question">${esc(p.text)}</h2>
         </div>
-        <h2 class="question">${esc(p.text)}</h2>
         ${body}
         <div class="poll-foot">
-          <span>${total}/${state.players.length} ${total > 1 ? 'ont voté' : 'a voté'}${author && by && author.id === by.id ? '' : ` · ${by ? 'lancée par ' + esc(by.name) : 'question du jour'}`} · ${ago(p.startsAt)}</span>
-          ${hasMenu ? `<button class="more-btn" data-more="${p.id}" aria-label="Options">${icon('more')}</button>` : ''}
+          <span>${total}/${state.players.length} ${total > 1 ? 'ont voté' : 'a voté'}${author && by && author.id === by.id ? '' : ` · ${by ? 'lancée par ' + esc(by.name) : 'question du jour'}`}</span>
+          <span class="foot-actions">
+            ${comments ? '' : `<button class="more-btn" data-chat="${p.id}" aria-label="Commenter">${icon('comment')}</button>`}
+            ${hasMenu ? `<button class="more-btn" data-more="${p.id}" aria-label="Options">${icon('more')}</button>` : ''}
+          </span>
         </div>
         ${pollChatPreview(p)}
       </article>`;
   }
 
+  // Ligne compacte (sondage déjà voté ou archivé) : un tap la déplie pour voir qui a voté pour qui.
+  function pollRow(p) {
+    const counts = Object.entries(p.results || {}).sort((a, b) => b[1] - a[1]);
+    const max = counts.length ? counts[0][1] : 0;
+    const leaders = counts.filter(([, c]) => c === max).map(([id]) => player(id));
+    const author = p.custom && p.authorId ? player(p.authorId) : null;
+    const c = p.chat || { count: 0, unread: 0 };
+    let lead;
+    if (!leaders.length) lead = 'Personne n’a voté';
+    else if (leaders.length === 1) lead = `<b>${esc(leaders[0].name)}</b>${p.ended ? '' : ' en tête'}`;
+    else lead = `<b>${leaders.map((u) => esc(u.name)).join(', ')}</b> ex æquo`;
+    const meta = [
+      lead,
+      `${p.voterIds.length}/${state.players.length}`,
+      p.ended ? ago(p.endsAt) : `encore ${left(p.endsAt)}`,
+    ];
+    return `
+      <button class="prow ${p.custom ? 'custom' : ''} ${flashId === p.id ? 'flash' : ''}" data-toggle="${p.id}" aria-expanded="false">
+        <span class="prow-av">${leaders.length ? avatar(leaders[0], 'sm') : '<span class="avatar sm empty-av">?</span>'}</span>
+        <span class="prow-body">
+          <span class="prow-q">${esc(p.text)}</span>
+          <span class="prow-meta">${author ? `<span class="prow-by">${icon('pen')}${esc(author.name)}</span>` : ''}${meta.join(' · ')}</span>
+        </span>
+        ${c.count ? `<span class="prow-chat ${c.unread ? 'new' : ''}">${icon('comment')}${c.unread || c.count}</span>` : ''}
+      </button>`;
+  }
+
+  // Sondage déjà voté / archivé : ligne compacte, ou carte complète si dépliée.
+  function pollItem(p) {
+    return openPolls.has(p.id) || editing === p.id ? pollCard(p, { collapsible: true }) : pollRow(p);
+  }
+
   function pollChatPreview(p) {
     const c = p.chat || { count: 0, unread: 0, last: [] };
-    if (!c.count) return `<button class="poll-chat" data-chat="${p.id}"><span class="pc-ico">${icon('comment')}</span><span class="pc-body muted">Commenter…</span></button>`;
+    if (!c.count) return '';
     const lines = c.last.map((m) => {
       const u = player(m.playerId);
       const who = m.playerId === state.me.playerId ? 'Toi' : esc(u.name);
@@ -622,24 +675,66 @@
   }
 
   function bindPollCards(view, list) {
-    view.querySelectorAll('[data-vote]').forEach((b) => {
-      b.onclick = async () => {
-        view.querySelectorAll(`[data-vote="${b.dataset.vote}"]`).forEach((x) => (x.disabled = true));
-        try {
-          const { poll } = await api('POST', `polls/${b.dataset.vote}/vote`, { playerId: b.dataset.target });
-          replacePoll(poll);
-          editing = null;
-          toast('Vote enregistré');
-          renderMain();
-        } catch (e) {
-          toast(e.message);
-          refresh();
-        }
-      };
-    });
+    view.querySelectorAll('[data-vote]').forEach((b) => (b.onclick = () => castVote(b)));
+    view.querySelectorAll('[data-toggle]').forEach((b) => (b.onclick = () => {
+      const id = b.dataset.toggle;
+      if (openPolls.has(id)) openPolls.delete(id);
+      else openPolls.add(id);
+      if (editing === id) editing = null;
+      renderView();
+    }));
     view.querySelectorAll('[data-chat]').forEach((b) => (b.onclick = () => openChat(b.dataset.chat)));
     view.querySelectorAll('[data-more]').forEach((b) => (b.onclick = () => openPollMenu(b.dataset.more)));
     view.querySelectorAll('[data-cancel]').forEach((b) => (b.onclick = () => { editing = null; renderView(); }));
+  }
+
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  const calm = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // Vote animé : 1) le choix s'illumine, 2) la carte montre les résultats et ton vote quelques secondes,
+  // 3) elle se replie en douceur et rejoint « Déjà voté », où sa ligne brille un instant.
+  async function castVote(b) {
+    if (animating) return;
+    const id = b.dataset.vote;
+    const card = b.closest('.poll');
+    const firstVote = !(findPoll(id) || {}).myVote;
+    animating = true;
+    card.querySelectorAll('[data-vote]').forEach((x) => (x.disabled = true));
+    card.classList.add('voting');
+    b.classList.add('chosen');
+    try {
+      const [{ poll }] = await Promise.all([api('POST', `polls/${id}/vote`, { playerId: b.dataset.target }), wait(calm() ? 0 : 500)]);
+      replacePoll(poll);
+      editing = null;
+      const tmp = document.createElement('div');
+      tmp.innerHTML = pollCard(poll, { justVoted: true, collapsible: !firstVote });
+      const fresh = tmp.firstElementChild;
+      const bars = [...fresh.querySelectorAll('.result .bar')];
+      const widths = bars.map((x) => x.style.width);
+      bars.forEach((x) => (x.style.width = '0'));
+      card.replaceWith(fresh);
+      bindPollCards(fresh);
+      requestAnimationFrame(() => requestAnimationFrame(() => bars.forEach((x, i) => (x.style.width = widths[i]))));
+      if (firstVote) {
+        await wait(calm() ? 900 : 2400);
+        fresh.style.height = fresh.offsetHeight + 'px';
+        fresh.offsetHeight; // force le calcul avant la transition
+        fresh.classList.add('leaving');
+        fresh.style.height = '0px';
+        await wait(calm() ? 0 : 450);
+        flashId = id;
+      } else {
+        openPolls.add(id);
+        await wait(calm() ? 0 : 1200);
+      }
+    } catch (e) {
+      toast(e.message);
+      refresh();
+    }
+    animating = false;
+    pendingRender = false;
+    renderMain();
+    flashId = null;
   }
 
   function replacePoll(poll) {
@@ -671,28 +766,65 @@
     if (liveMode === 'archive') return renderArchive(view);
     const todo = state.live.filter((p) => !p.myVote);
     const done = state.live.filter((p) => p.myVote);
-    const next = state.nextDrop
-      ? `Prochaine question <b>${clock(state.nextDrop)}</b>`
-      : 'Pas de prochain drop prévu';
 
     view.innerHTML = `
       ${installBanner()}
-      ${liveSwitch()}
-      <p class="next-line">${next} · ${plural(state.remainingQuestions, 'question')} en réserve</p>
+      <div class="live-head">${liveSwitch()}${dropMeter()}</div>
       ${!state.live.length ? `
         <div class="card empty">
           Rien à voter pour l’instant…<br>Lance une question avec le bouton + si tu t’ennuies.
         </div>` : ''}
-      ${todo.length ? `<div class="section-title">À toi de voter <span class="count">${todo.length}</span></div>${todo.map(pollCard).join('')}` : ''}
+      ${todo.length ? `<div class="section-title">À toi de voter <span class="count">${todo.length}</span></div>${todo.map((p) => pollCard(p)).join('')}` : ''}
       ${!todo.length && done.length ? '<p class="all-done">Tu as voté partout.</p>' : ''}
-      ${done.length ? `<div class="section-title">Déjà voté <span class="count">${done.length}</span></div>${done.map(pollCard).join('')}` : ''}
+      ${done.length ? `<div class="section-title">Déjà voté <span class="count">${done.length}</span></div><div class="prow-list">${done.map(pollItem).join('')}</div>` : ''}
       <button class="fab" id="fab" aria-label="Lancer une question">${icon('plus')}</button>`;
 
     bindPollCards(view);
     bindLiveSwitch(view);
     bindInstallBanner();
     document.getElementById('fab').onclick = () => openDropSheet();
+    const meter = document.getElementById('dropMeter');
+    if (meter) meter.onclick = openDropInfo;
   }
+
+  // Compte à rebours vers la prochaine question auto : un petit anneau qui se remplit.
+  function dropMeter() {
+    if (!state.nextDrop) return '';
+    const end = state.nextDrop;
+    const start = state.prevDrop && state.prevDrop < end ? state.prevDrop : end - state.settings.intervalHours * 3600e3;
+    const frac = Math.min(1, Math.max(0, (now() - start) / (end - start)));
+    const C = 2 * Math.PI * 8;
+    return `
+      <button class="drop-meter" id="dropMeter" aria-label="Prochaine question dans ${left(end)}">
+        <svg viewBox="0 0 20 20" aria-hidden="true">
+          <circle cx="10" cy="10" r="8" class="dm-track"/>
+          <circle cx="10" cy="10" r="8" class="dm-fill" stroke-dasharray="${C.toFixed(2)}" stroke-dashoffset="${(C * (1 - frac)).toFixed(2)}"/>
+        </svg>
+        <span>${left(end).replace(' h ', 'h')}</span>
+      </button>`;
+  }
+
+  function openDropInfo() {
+    const total = state.sets.reduce((n, s) => n + s.total, 0) || 1;
+    const pct = Math.round((state.remainingQuestions / total) * 100);
+    openSheet(`
+      <div class="sheet-head"><h2>Prochaine question</h2><button class="x" data-close>✕</button></div>
+      <p class="drop-info-big">${clock(state.nextDrop)} <span class="muted">· dans ${left(state.nextDrop)}</span></p>
+      <p class="muted small">Une question tombe toutes les ${String(state.settings.intervalHours).replace('.', ',')} h, de ${state.settings.startHour} h à ${state.settings.endHour} h.</p>
+      <div class="reserve">
+        <div class="reserve-label"><span>Questions en réserve</span><b>${state.remainingQuestions} / ${total}</b></div>
+        <div class="reserve-bar"><span style="width:${pct}%"></span></div>
+      </div>`, () => {});
+  }
+
+  // L'anneau avance tout seul, sans redessiner l'écran.
+  setInterval(() => {
+    const m = document.getElementById('dropMeter');
+    if (!m || !state || animating) return;
+    m.outerHTML = dropMeter();
+    const fresh = document.getElementById('dropMeter');
+    if (fresh) fresh.onclick = openDropInfo;
+  }, 30000);
 
   // ---------- Installation sur l'écran d'accueil ----------
 
@@ -824,7 +956,7 @@
           ${state.sets.map((s) => `<option value="${s.id}" ${archiveSet === s.id ? 'selected' : ''}>${esc(s.emoji)} ${esc(s.name)}</option>`).join('')}
         </select>
       </div>
-      ${data.items.length ? data.items.map(pollCard).join('') : `<div class="card empty"><span class="big">📜</span>Rien dans les archives pour l’instant.<br>Les questions y arrivent après leurs 24 h de vote.</div>`}
+      ${data.items.length ? `<div class="prow-list">${data.items.map(pollItem).join('')}</div>` : `<div class="card empty">Rien dans les archives pour l’instant.<br>Les questions y arrivent après leurs 24 h de vote.</div>`}
       ${data.hasMore ? '<button class="btn btn-soft btn-block" id="more">Voir plus</button>' : ''}`;
 
     bindPollCards(view);

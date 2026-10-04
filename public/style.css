@@ -1370,3 +1370,145 @@ main { padding-top: 14px; }
 .drops-left.empty { color: var(--danger); }
 
 .install-banner { padding-left: 16px; }
+
+/* =====================================================================
+   v5 : plus compact — barre du haut fine, lignes repliées, vote animé
+   ===================================================================== */
+
+/* Barre du haut : le nom du groupe a toute la place, on ne garde que l'avatar à droite */
+.top { padding: 10px 14px; padding-top: max(10px, env(safe-area-inset-top)); gap: 10px; }
+.top h1 { font-size: 1.15rem; margin: 0; }
+.me-chip { padding: 2px; gap: 0; flex-shrink: 0; }
+.me-chip .avatar { width: 30px; height: 30px; font-size: 1rem; }
+.theme-btn { width: 46px; height: 26px; margin-right: 0; }
+.theme-knob { width: 20px; height: 20px; }
+.theme-btn.on .theme-knob { transform: translateX(20px); }
+.theme-knob .ico-svg { width: 13px; height: 13px; }
+
+main { padding-top: 10px; }
+.card { margin-bottom: 12px; }
+.section-title { margin: 16px 4px 8px; }
+
+/* En cours / Archives + compte à rebours sur la même ligne */
+.live-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.live-head .live-seg { flex: 1; margin: 0; }
+.drop-meter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 40px;
+  padding: 0 12px 0 9px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--soft);
+  color: var(--text);
+  font-size: 0.82rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+.drop-meter svg { width: 20px; height: 20px; transform: rotate(-90deg); }
+.dm-track, .dm-fill { fill: none; stroke-width: 3; }
+.dm-track { stroke: var(--border); }
+.dm-fill { stroke: var(--pink); stroke-linecap: round; transition: stroke-dashoffset 0.6s; }
+.drop-info-big { font-size: 1.6rem; font-weight: 700; margin: 0 0 4px; }
+.drop-info-big .muted { font-size: 1rem; font-weight: 500; }
+.reserve { margin-top: 16px; }
+.reserve-label { display: flex; justify-content: space-between; font-size: 0.9rem; margin-bottom: 6px; }
+.reserve-bar { height: 8px; border-radius: 4px; background: var(--soft); border: 1px solid var(--border); overflow: hidden; }
+.reserve-bar span { display: block; height: 100%; background: var(--grad); border-radius: 4px; }
+
+/* Cartes à voter : plus serrées */
+.poll { padding: 14px 14px 10px; }
+.poll .question { font-size: 1.08rem; margin: 0 0 12px; }
+.poll-top { margin-bottom: 6px; }
+.vote-list { gap: 6px; }
+.vote-opt { padding: 6px 8px; gap: 7px; font-size: 0.9rem; border-radius: 12px; }
+.vote-opt .avatar { width: 26px; height: 26px; font-size: 0.9rem; }
+.result .avatar, .result-main .avatar { width: 26px; height: 26px; font-size: 0.9rem; }
+.result { padding: 6px 10px 6px 6px; }
+.result-voters { margin-left: 36px; }
+.poll-foot { margin-top: 10px; padding-top: 6px; }
+.foot-actions { display: flex; align-items: center; flex-shrink: 0; }
+.poll-chat { margin-top: 8px; padding: 7px 10px; }
+.custom-tag { margin: -14px -14px 10px; padding: 7px 14px; }
+.poll-head[data-toggle] { cursor: pointer; }
+.fold { display: inline-grid; vertical-align: middle; margin-left: 6px; transform: rotate(180deg); }
+.fold .ico-svg { width: 16px; height: 16px; }
+
+/* Lignes compactes : sondages déjà votés et archives */
+.prow-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+.prow-list > .card { margin-bottom: 0; }
+.prow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 12px 9px 9px;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--text);
+  text-align: left;
+  box-shadow: var(--shadow);
+}
+.prow:active { transform: scale(0.99); }
+.prow.custom { border-left: 3px solid #ff9f43; }
+.prow-av { flex-shrink: 0; display: grid; }
+.prow-av .avatar { width: 34px; height: 34px; font-size: 1.1rem; }
+.empty-av { background: var(--soft); color: var(--muted); }
+.prow-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.prow-q {
+  font-weight: 600;
+  font-size: 0.92rem;
+  line-height: 1.3;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.prow-meta { font-size: 0.78rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.prow-meta b { color: var(--text); font-weight: 600; }
+.prow-by { display: inline-flex; align-items: center; gap: 3px; color: #c2620f; margin-right: 6px; }
+.prow-by .ico-svg { width: 12px; height: 12px; }
+[data-theme="dark"] .prow-by { color: #ffb36b; }
+[data-theme="dark"] .prow.custom { border-left-color: #d97a2b; }
+.prow-chat { display: flex; align-items: center; gap: 3px; flex-shrink: 0; font-size: 0.75rem; font-weight: 700; color: var(--muted); }
+.prow-chat .ico-svg { width: 14px; height: 14px; }
+.prow-chat.new { color: var(--pink); }
+
+/* Animation du vote */
+.poll.voting .vote-opt:not(.chosen) { opacity: 0.35; transform: scale(0.97); transition: opacity 0.25s, transform 0.25s; }
+.vote-opt.chosen { border-color: var(--accent); background: var(--soft); animation: chosen 0.5s cubic-bezier(0.3, 1.6, 0.5, 1); box-shadow: 0 0 0 3px #7b2ff733; }
+@keyframes chosen { 0% { transform: scale(1); } 40% { transform: scale(1.07); } 100% { transform: scale(1); } }
+.poll.just-voted { animation: pop 0.35s ease-out; border: 1.5px solid var(--accent); }
+.voted-banner {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 0 10px;
+  padding: 7px 10px;
+  border-radius: 12px;
+  background: #10ac8418;
+  color: var(--good);
+  font-size: 0.88rem;
+  animation: pop 0.35s ease-out;
+}
+.voted-banner b { color: var(--text); }
+.voted-banner .ico-svg { width: 17px; height: 17px; stroke-width: 2.6; }
+.poll.custom .voted-banner { margin-top: 0; }
+.poll.leaving {
+  overflow: hidden;
+  opacity: 0;
+  margin-bottom: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  transform: translateY(24px) scale(0.97);
+  transition: height 0.45s ease, opacity 0.35s ease, margin 0.45s ease, padding 0.45s ease, transform 0.45s ease;
+}
+.prow.flash { animation: flash 1.6s ease-out; }
+@keyframes flash {
+  0% { box-shadow: 0 0 0 0 #f107a300; transform: translateY(-10px); opacity: 0; }
+  20% { box-shadow: 0 0 0 4px #f107a355; transform: none; opacity: 1; }
+  100% { box-shadow: var(--shadow); }
+}

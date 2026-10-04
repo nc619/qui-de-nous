@@ -290,6 +290,7 @@ function stateFor(g, me, now) {
     stats: computeStats(g, now),
     settings: g.settings,
     nextDrop: nextSlot(now, g.settings),
+    prevDrop: latestSlot(now, g.settings) || null,
     remainingQuestions: game.unused(g).length,
     vapidKey: push.publicKey(),
   };
