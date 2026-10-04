@@ -9,6 +9,7 @@ const { STATS, parseWeights, computeStats } = require('./lib/stats');
 const push = require('./lib/push');
 const game = require('./lib/game');
 const chat = require('./lib/chat');
+const photos = require('./lib/photos');
 const live = require('./lib/live');
 const gifs = require('./lib/gifs');
 const { HttpError, newId, cleanText, COLORS } = game;
@@ -21,7 +22,7 @@ const ARCHIVE_PAGE = 30;
 const WORDS = new Set([
   'health', 'groups', 'roster', 'join', 'login', 'logout', 'state', 'archive', 'me', 'polls', 'vote', 'drop',
   'sets', 'questions', 'push', 'subscribe', 'unsubscribe', 'admin', 'players', 'reset', 'settings', 'drop-auto',
-  'unscored', 'scores', 'group', 'code', 'chat', 'read', 'typing', 'events', 'gifs', 'messages', 'presence', 'test', 'react',
+  'unscored', 'scores', 'group', 'code', 'chat', 'read', 'typing', 'events', 'gifs', 'messages', 'presence', 'test', 'react', 'photos', 'photo',
 ]);
 
 // Questions en plus lancées à la main (bouton +) : 3 par personne et par jour, remise à zéro à minuit
@@ -156,8 +157,15 @@ function checkCreationRate(ip) {
   creations.set(ip, list);
 }
 
-function publicPlayer(p) {
-  return { id: p.id, name: p.name, emoji: p.emoji, color: p.color, claimed: !!p.userId };
+// Couleur et animal par défaut : selon la place dans la liste du groupe (1re personne = 1re couleur…).
+function publicPlayer(p, g) {
+  const i = Math.max(0, Object.values(g.players).sort((a, b) => a.createdAt - b.createdAt).indexOf(p));
+  return {
+    id: p.id, name: p.name, claimed: !!p.userId,
+    color: COLORS[i % COLORS.length],
+    animal: (i + Math.floor(i / COLORS.length) * 5) % 12,
+    photo: p.photo || null,
+  };
 }
 
 // ---------- Chat ----------
@@ -282,7 +290,7 @@ function stateFor(g, me, now) {
     now,
     group: { name: g.name, code: g.code },
     me: { userId: me.id, playerId: me.playerId, isAdmin: !!me.isAdmin, notif: push.prefs(me), dropsLeft: dropsLeft(g, me.id, now), dropsPerDay: DAILY_DROPS },
-    players: Object.values(g.players).sort((a, b) => a.createdAt - b.createdAt).map(publicPlayer),
+    players: Object.values(g.players).sort((a, b) => a.createdAt - b.createdAt).map((p) => publicPlayer(p, g)),
     sets: Object.values(g.sets)
       .sort((a, b) => (a.spicy - b.spicy) || (b.builtin - a.builtin) || ((a.order ?? 0) - (b.order ?? 0)) || a.createdAt - b.createdAt)
       .map((s) => game.setView(g, s, me)),
@@ -320,6 +328,17 @@ async function api(req, res, url) {
     case 'GET /health':
       return ok({ ok: true });
 
+    // Photo de profil (publique : l'identifiant est aléatoire ; « ?v= » change à chaque nouvelle photo).
+    case 'GET /photos/:id': {
+      const ph = photos.get(id);
+      if (!ph) {
+        res.writeHead(404, { 'Cache-Control': 'no-store' });
+        return res.end();
+      }
+      res.writeHead(200, { 'Content-Type': ph.mime, 'Cache-Control': 'public, max-age=31536000, immutable' });
+      return res.end(ph.buf);
+    }
+
     case 'POST /groups':
       return guarded(ip, () => {
         const name = cleanText(body.groupName, 2, 40, 'Le nom du groupe');
@@ -339,7 +358,7 @@ async function api(req, res, url) {
     case 'POST /roster':
       return guarded(ip, () => {
         const g = groupByCode(body.code);
-        const players = Object.values(g.players).filter((p) => !p.userId).sort((a, b) => a.createdAt - b.createdAt).map(publicPlayer);
+        const players = Object.values(g.players).filter((p) => !p.userId).sort((a, b) => a.createdAt - b.createdAt).map((p) => publicPlayer(p, g));
         ok({ group: { name: g.name, code: g.code }, players });
       });
 
@@ -473,6 +492,22 @@ async function api(req, res, url) {
     case 'GET /archive':
       return ok(archiveList(g, me, now, Number(url.searchParams.get('before')) || 0, url.searchParams.get('set') || null));
 
+    case 'POST /me/photo': {
+      const v = await photos.put(myPlayer.id, body.data);
+      if (!v) throw new HttpError(400, 'Photo invalide ou trop lourde');
+      myPlayer.photo = v;
+      persist();
+      live.emit(g.id, 'refresh', {});
+      return ok({ photo: v });
+    }
+
+    case 'DELETE /me/photo':
+      await photos.remove(myPlayer.id);
+      delete myPlayer.photo;
+      persist();
+      live.emit(g.id, 'refresh', {});
+      return ok();
+
     case 'PATCH /me':
       if (body.name != null) myPlayer.name = cleanName(g, body.name, myPlayer.id);
       if (body.emoji) myPlayer.emoji = cleanEmoji(body.emoji);
@@ -481,7 +516,7 @@ async function api(req, res, url) {
         for (const k of push.KINDS) if (k in body.notif) me.notif[k] = !!body.notif[k];
       }
       persist();
-      return ok({ player: publicPlayer(myPlayer), notif: push.prefs(me) });
+      return ok({ player: publicPlayer(myPlayer, g), notif: push.prefs(me) });
 
     // --- Sondages ---
     case 'POST /polls/:id/vote': {
@@ -662,7 +697,7 @@ async function api(req, res, url) {
       if (body.name != null) player.name = cleanName(g, body.name, player.id);
       if (body.emoji) player.emoji = cleanEmoji(body.emoji);
       persist();
-      return ok({ player: publicPlayer(player) });
+      return ok({ player: publicPlayer(player, g) });
     }
 
     case 'POST /admin/players/:id/reset': {
@@ -807,6 +842,7 @@ load()
     const groups = Object.values(store.db.groups);
     const r = game.reloadSeed(groups);
     const messages = await chat.load();
+    await photos.load();
     push.init();
     setInterval(() => {
       for (const g of Object.values(store.db.groups)) game.tick(g);

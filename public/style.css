@@ -1665,3 +1665,73 @@ main { padding-top: 10px; }
 .prow-bar i { display: block; height: 100%; min-width: 3px; }
 .prow-pct { flex-shrink: 0; font-size: 0.75rem; font-weight: 700; color: var(--muted); font-variant-numeric: tabular-nums; width: 32px; text-align: right; }
 .prow-meta { font-size: 0.72rem; }
+
+/* =====================================================================
+   v7 : photos de profil / animaux, couleur par personne, résultats en barre pleine largeur
+   ===================================================================== */
+
+.avatar { background: var(--pc, var(--soft)); overflow: hidden; padding: 0; }
+.avatar svg, .avatar img { width: 100%; height: 100%; display: block; }
+.avatar img { object-fit: cover; }
+.avatar.has-photo { box-shadow: 0 0 0 2px var(--pc); }
+.avatar.xs.has-photo { box-shadow: 0 0 0 1.5px var(--pc); }
+.nobody-av { background: var(--soft); color: var(--muted); font-weight: 700; display: grid; place-items: center; }
+.vote-opt.picked .avatar, .vote-opt.chosen .avatar { box-shadow: 0 0 0 2px var(--card), 0 0 0 4px var(--pc); }
+
+/* Moi : photo cliquable */
+.photo-btn { position: relative; padding: 0; border-radius: 50%; flex-shrink: 0; }
+.photo-btn .avatar.lg { width: 64px; height: 64px; }
+.photo-edit {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--card);
+  border: 1px solid var(--border);
+  display: grid;
+  place-items: center;
+  color: var(--accent-text);
+}
+.photo-edit .ico-svg { width: 13px; height: 13px; }
+.photo-links { display: flex; gap: 14px; margin-top: 2px; }
+.photo-links .link-btn { padding: 2px 0; font-size: 0.85rem; }
+
+/* Rejoindre / créer : choix de la photo */
+.photo-pick {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px dashed var(--border);
+  background: var(--soft);
+  text-align: left;
+  font-weight: 600;
+  color: var(--accent-text);
+}
+.photo-pick .avatar.lg { width: 52px; height: 52px; flex-shrink: 0; }
+.photo-pick small { display: block; font-weight: 400; font-size: 0.78rem; margin-top: 2px; }
+
+/* Lignes repliées : question en haut, résultat sur toute la largeur en dessous */
+.prow { flex-direction: column; align-items: stretch; gap: 8px; padding: 10px 12px; }
+.prow-top { display: flex; align-items: flex-start; gap: 10px; }
+.prow-set { width: 32px; height: 32px; font-size: 1.05rem; border-radius: 10px; }
+.prow-body { padding-top: 1px; }
+.prow-q { font-size: 0.93rem; }
+.prow-by { font-size: 0.74rem; margin: 2px 0 0; }
+.prow-chat { padding-top: 6px; }
+.prow-res { display: flex; flex-direction: column; gap: 6px; }
+.prow-lead { display: flex; align-items: center; gap: 7px; font-size: 0.88rem; }
+.prow-lead b { max-width: none; flex-shrink: 1; min-width: 0; }
+.prow-avs .avatar.xs { width: 24px; height: 24px; }
+.prow-avs .avatar.xs + .avatar.xs { margin-left: -7px; box-shadow: 0 0 0 2px var(--card); }
+.prow-pct { width: auto; font-size: 0.85rem; color: var(--text); }
+.prow-lead .prow-meta { margin-left: auto; font-size: 0.74rem; flex-shrink: 0; }
+.prow-bar { flex: none; width: 100%; height: 10px; border-radius: 5px; gap: 2px; }
+.prow-bar i { min-width: 4px; }
+.prow-bar i:first-child { border-radius: 5px 0 0 5px; }
+.prow-bar i:last-child { border-radius: 0 5px 5px 0; }
+.prow-bar i:only-child { border-radius: 5px; }

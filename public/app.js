@@ -1,6 +1,5 @@
 // "Qui de nous ?" — client.
 (() => {
-  const EMOJIS = ['😎', '🤪', '😈', '🥳', '🤠', '👽', '🐸', '🦄', '🐼', '🦊', '🐙', '🍕', '🔥', '⚡', '🌈', '👑', '🤡', '😇', '🥶', '🐒', '🦖', '🍑', '🌚', '💀', '🐐', '🦁', '🍆', '🫠', '🧠', '💅', '🍷', '🐍'];
   const SET_EMOJIS = ['✨', '🎉', '💀', '🔮', '🤡', '💔', '🧟', '🧠', '🤫', '📱', '🏆', '🚔', '✈️', '🌶️', '🔥', '😈', '🍻', '🏖️', '🎮', '⚽', '🎓', '💼', '🎤', '🍕'];
 
   const $app = document.getElementById('app');
@@ -133,8 +132,43 @@
   }
   const me = () => player(state.me.playerId);
 
+  // Avatar : la photo de la personne, sinon son animal par défaut, toujours sur sa couleur.
   function avatar(p, size = '') {
-    return `<span class="avatar ${size}" style="background:${esc(p.color)}33" title="${esc(p.name)}">${esc(p.emoji)}</span>`;
+    if (p.id === 'nobody') return `<span class="avatar ${size} nobody-av" title="Personne">∅</span>`;
+    const inner = p.photo
+      ? `<img src="/api/photos/${esc(p.id)}?v=${esc(p.photo)}" alt="" loading="lazy" decoding="async">`
+      : `<svg viewBox="0 0 64 64" aria-hidden="true"><use href="#an-${Number(p.animal) || 0}"/></svg>`;
+    return `<span class="avatar ${size} ${p.photo ? 'has-photo' : ''}" style="--pc:${esc(p.color)}" title="${esc(p.name)}">${inner}</span>`;
+  }
+
+  // Photo choisie sur le téléphone → recadrée en carré 256 px (JPEG) avant l'envoi.
+  function pickPhoto() {
+    return new Promise((resolve) => {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'image/*';
+      input.onchange = () => {
+        const file = input.files && input.files[0];
+        if (!file) return resolve(null);
+        const url = URL.createObjectURL(file);
+        const img = new Image();
+        img.onload = () => {
+          const side = Math.min(img.naturalWidth, img.naturalHeight);
+          const canvas = document.createElement('canvas');
+          canvas.width = canvas.height = 256;
+          canvas.getContext('2d').drawImage(img, (img.naturalWidth - side) / 2, (img.naturalHeight - side) / 2, side, side, 0, 0, 256, 256);
+          URL.revokeObjectURL(url);
+          resolve(canvas.toDataURL('image/jpeg', 0.85));
+        };
+        img.onerror = () => {
+          URL.revokeObjectURL(url);
+          toast('Image illisible');
+          resolve(null);
+        };
+        img.src = url;
+      };
+      input.click();
+    });
   }
 
   function setBadge(s) {
@@ -198,13 +232,20 @@
     stopPolling();
     closeSheet();
     mode = mode || (load('joined') ? 'login' : 'join');
-    let emoji = EMOJIS[Math.floor(Math.random() * EMOJIS.length)];
+    let photoData = null; // photo choisie avant de rejoindre (envoyée une fois connecté)
     let roster = null; // { group, players } une fois le code validé
     let picked = null;
 
     const codeField = (hint) => `
       <label for="code">Code du groupe</label>
       <input class="input code-input" id="code" required autocapitalize="characters" autocomplete="off" maxlength="12" placeholder="${hint}" value="${esc(load('code') || '')}">`;
+
+    const photoField = (p) => `
+      <label>Ta photo <span class="muted">(optionnel)</span></label>
+      <button type="button" class="photo-pick" id="authPhoto">
+        ${photoData ? `<span class="avatar lg has-photo" style="--pc:${esc(p.color)}"><img src="${photoData}" alt=""></span>` : avatar({ ...p, photo: null }, 'lg')}
+        <span>${photoData ? 'Changer la photo' : 'Choisir une photo'}<small class="muted">Sinon, tu gardes cet animal</small></span>
+      </button>`;
 
     const draw = () => {
       let fields = '';
@@ -216,7 +257,7 @@
           <label for="name">Ton pseudo</label>
           <input class="input" id="name" required maxlength="24" placeholder="Ton petit nom">
           ${pinField()}
-          <label>Ton emoji</label>${emojiGrid(EMOJIS, emoji)}`;
+          ${photoField({ id: 'me', color: '#e63946', animal: 0, name: '' })}`;
       } else if (mode === 'login') {
         fields = `
           ${codeField('Ex : K7QM2P')}
@@ -236,7 +277,7 @@
             <label for="name">Ton pseudo (tu peux le changer)</label>
             <input class="input" id="name" required maxlength="24" value="${esc(picked.name)}">
             ${pinField()}
-            <label>Ton emoji</label>${emojiGrid(EMOJIS, emoji)}` : ''}`;
+            ${photoField(picked)}` : ''}`;
       }
       const label = mode === 'create' ? 'Créer le groupe' : mode === 'login' ? 'Entrer' : roster ? 'C’est parti' : 'Continuer →';
       const hideBtn = mode === 'join' && roster && !picked;
@@ -262,7 +303,8 @@
       $app.querySelectorAll('[data-pick]').forEach((b) => (b.onclick = () => { picked = roster.players.find((p) => p.id === b.dataset.pick); draw(); }));
       const other = document.getElementById('otherCode');
       if (other) other.onclick = () => { roster = null; picked = null; draw(); };
-      bindEmojiGrid($app, (e) => (emoji = e));
+      const ph = document.getElementById('authPhoto');
+      if (ph) ph.onclick = async () => { const d = await pickPhoto(); if (d) { photoData = d; draw(); } };
 
       const form = document.getElementById('authForm');
       form.onsubmit = async (e) => {
@@ -273,7 +315,7 @@
         try {
           let data;
           if (mode === 'create') {
-            data = await api('POST', 'groups', { groupName: val('groupName'), name: val('name'), pin: val('pin'), emoji });
+            data = await api('POST', 'groups', { groupName: val('groupName'), name: val('name'), pin: val('pin') });
             save('code', data.code);
             save('lastName', val('name'));
           } else if (mode === 'login') {
@@ -286,13 +328,14 @@
             err = '';
             return draw();
           } else {
-            data = await api('POST', 'join', { code: roster.group.code, playerId: picked.id, name: val('name'), pin: val('pin'), emoji });
+            data = await api('POST', 'join', { code: roster.group.code, playerId: picked.id, name: val('name'), pin: val('pin') });
             save('lastName', val('name'));
           }
           token = data.token;
           save('token', token);
           save('joined', '1');
           if (mode === 'create') { tab = 'me'; save('tab', tab); }
+          if (photoData) await api('POST', 'me/photo', { data: photoData }).catch((e2) => toast(e2.message));
           await refresh();
           confetti();
           if (mode === 'create') showInvite(true);
@@ -615,28 +658,32 @@
     const author = p.custom && p.authorId ? player(p.authorId) : null;
     const c = p.chat || { count: 0, unread: 0 };
     const total = counts.reduce((n, [, x]) => n + x, 0);
-    // Le gagnant en avatar + nom + %, et une barre qui montre la répartition des votes (gagnant en couleur vive).
-    const lead = leaders.length
-      ? `<span class="prow-lead">
-          <span class="prow-avs">${leaders.slice(0, 2).map((u) => avatar(u, 'xs')).join('')}</span>
-          <b>${esc(leaders.length === 1 ? leaders[0].name : leaders.length === 2 ? `${leaders[0].name}, ${leaders[1].name}` : `${leaders.length} ex æquo`)}</b>
-          <span class="prow-bar">${counts.map(([id, x]) => `<i style="flex:${x};background:${esc(player(id).color)};${x === max ? '' : 'opacity:.3'}"></i>`).join('')}</span>
-          <span class="prow-pct">${Math.round((max / total) * 100)}%</span>
-        </span>`
-      : '<span class="prow-lead muted">Personne n’a voté</span>';
     const meta = [
-      `${plural(p.voterIds.length, 'vote')}`,
+      plural(p.voterIds.length, 'vote'),
       p.ended ? ago(p.endsAt) : `encore ${left(p.endsAt)}`,
     ];
+    // Sous la question, sur toute la largeur : le gagnant (avatar, nom, %) puis une barre de répartition des votes,
+    // un segment par personne votée, dans sa couleur (le gagnant en vif, les autres plus pâles).
+    const result = leaders.length
+      ? `<span class="prow-lead">
+          <span class="prow-avs">${leaders.slice(0, 3).map((u) => avatar(u, 'xs')).join('')}</span>
+          <b>${esc(leaders.length === 1 ? leaders[0].name : leaders.length === 2 ? `${leaders[0].name}, ${leaders[1].name}` : `${leaders.length} ex æquo`)}</b>
+          <span class="prow-pct">${Math.round((max / total) * 100)}%</span>
+          <span class="prow-meta">${meta.join(' · ')}</span>
+        </span>
+        <span class="prow-bar">${counts.map(([id, x]) => `<i style="flex:${x};background:${esc(player(id).color)};${x === max ? '' : 'opacity:.35'}"></i>`).join('')}</span>`
+      : `<span class="prow-lead"><span class="muted">Personne n’a voté</span><span class="prow-meta">${meta.join(' · ')}</span></span>`;
     return `
       <button class="prow ${p.custom ? 'custom' : ''} ${flashId === p.id ? 'flash' : ''}" data-toggle="${p.id}" aria-expanded="false">
-        <span class="prow-set ${setOf(p.setId).spicy ? 'spicy' : ''}" title="${esc(setOf(p.setId).name)}">${esc(setOf(p.setId).emoji)}</span>
-        <span class="prow-body">
-          <span class="prow-q">${esc(p.text)}</span>
-          ${lead}
-          <span class="prow-meta">${author ? `<span class="prow-by">${icon('pen')}${esc(author.name)}</span>` : ''}${meta.join(' · ')}</span>
+        <span class="prow-top">
+          <span class="prow-set ${setOf(p.setId).spicy ? 'spicy' : ''}" title="${esc(setOf(p.setId).name)}">${esc(setOf(p.setId).emoji)}</span>
+          <span class="prow-body">
+            <span class="prow-q">${esc(p.text)}</span>
+            ${author ? `<span class="prow-by">${icon('pen')}Question de ${esc(author.name)}</span>` : ''}
+          </span>
+          ${c.count ? `<span class="prow-chat ${c.unread ? 'new' : ''}">${icon('comment')}${c.unread || c.count}</span>` : ''}
         </span>
-        ${c.count ? `<span class="prow-chat ${c.unread ? 'new' : ''}">${icon('comment')}${c.unread || c.count}</span>` : ''}
+        <span class="prow-res">${result}</span>
       </button>`;
   }
 
@@ -1186,18 +1233,21 @@
     view.innerHTML = `
       <div class="card" id="profileCard">
         <div class="profile-row">
-          <span class="avatar lg" style="background:${esc(m.color)}33">${esc(m.emoji)}</span>
-          <div class="profile-text"><b>${esc(m.name)}</b><span class="muted small">${state.me.isAdmin ? 'Admin du groupe' : 'Membre du groupe'}</span></div>
+          <button class="photo-btn" id="photoBtn" aria-label="Changer ma photo">${avatar(m, 'lg')}<span class="photo-edit">${icon('edit')}</span></button>
+          <div class="profile-text">
+            <b>${esc(m.name)}</b>
+            <span class="muted small">${state.me.isAdmin ? 'Admin du groupe' : 'Membre du groupe'}</span>
+            <span class="photo-links">
+              <button class="link-btn" id="photoBtn2">${m.photo ? 'Changer la photo' : 'Ajouter une photo'}</button>
+              ${m.photo ? '<button class="link-btn muted" id="photoDel">Retirer</button>' : ''}
+            </span>
+          </div>
         </div>
         <label for="myName">Pseudo</label>
         <div class="inline-form">
           <input class="input" id="myName" maxlength="24" value="${esc(m.name)}">
           <button class="btn btn-soft" id="saveName">OK</button>
         </div>
-        <details class="emoji-pick">
-          <summary>Changer d’emoji</summary>
-          ${emojiGrid(EMOJIS, m.emoji)}
-        </details>
       </div>
 
       <div class="card">
@@ -1234,12 +1284,21 @@
       toast('Pseudo changé');
       await refresh();
     });
-    bindEmojiGrid(document.getElementById('profileCard'), async (emoji) => {
+    const changePhoto = async () => {
+      const data = await pickPhoto();
+      if (!data) return;
       try {
-        await api('PATCH', 'me', { emoji });
-        toast('Emoji changé');
+        await api('POST', 'me/photo', { data });
+        toast('Photo mise à jour');
         await refresh();
       } catch (e) { toast(e.message); }
+    };
+    document.getElementById('photoBtn').onclick = changePhoto;
+    document.getElementById('photoBtn2').onclick = changePhoto;
+    action(document.getElementById('photoDel'), async () => {
+      await api('DELETE', 'me/photo');
+      toast('Photo retirée');
+      await refresh();
     });
     setupPushButton(pushOk);
     view.querySelectorAll('[data-notif]').forEach((el) => {
