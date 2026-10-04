@@ -21,6 +21,8 @@ Puis ouvrir http://localhost:3000.
 | `DATA_FILE`    | Fichier JSON utilisé si pas de `DATABASE_URL`                        | `data/db.json`  |
 | `PORT`         | Port HTTP                                                            | `3000`          |
 | `PUSH_CONTACT` | Contact envoyé aux services de notifications (`mailto:…`)            | `mailto:admin@example.com` |
+| `GIPHY_API_KEY`| Clé Giphy pour chercher des GIFs dans le chat                        | *(GIFs désactivés)* |
+| `TENOR_API_KEY`| Alternative à Giphy (utilisée si pas de clé Giphy)                   | *(aucune)*      |
 
 Sans `DATABASE_URL`, tout est enregistré dans `data/db.json`.
 
@@ -34,6 +36,7 @@ Sans `DATABASE_URL`, tout est enregistré dans `data/db.json`.
 - **Sets** : les sets intégrés viennent de [`questions.md`](questions.md) (dont 3 spicy 18+), plus ceux créés par chaque groupe. Les questions pas encore jouées restent secrètes.
 - **Stats** : 6 stats (🔥 Chaos, 💋 Hot, 🧠 Cerveau, 🤡 Gênance, 🐍 Toxique, 🍷 Excès). Chaque question a des poids ; chaque sondage terminé les distribue selon la part de votes reçus → radar, classements et titres.
 - **Questions du groupe** : elles n'ont pas de poids au départ. Admin → « Copier les questions à noter », les donner à Claude, puis coller sa réponse dans « Importer les scores ».
+- **Chat** : un chat général par groupe + une discussion par sondage (aperçu des 2 derniers messages sur la carte). Temps réel (Server-Sent Events) : « X écrit… », accusés de lecture (avatars sous le dernier message lu), GIFs, suppression de ses messages (l'admin peut tout supprimer). Les messages sont stockés à part (`data/chat.jsonl` ou table `quidenous_chat`).
 - **Notifications** : bouton dans Moi. Il faut https (ou localhost) ; sur iPhone, ajouter d'abord le site à l'écran d'accueil.
 
 ## Modifier les questions intégrées

@@ -13,3 +13,5 @@ services:
         sync: false
       - key: PUSH_CONTACT # ex. mailto:ton.email@exemple.com
         sync: false
+      - key: GIPHY_API_KEY # clé gratuite sur developers.giphy.com (ou TENOR_API_KEY à la place)
+        sync: false

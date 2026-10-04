@@ -3,11 +3,14 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { store, load, persist, newGroup, newCode } = require('./lib/store');
+const { store, load, persist, flush, newGroup, newCode } = require('./lib/store');
 const { latestSlot, nextSlot, isValidTimezone } = require('./lib/schedule');
 const { STATS, parseWeights, computeStats } = require('./lib/stats');
 const push = require('./lib/push');
 const game = require('./lib/game');
+const chat = require('./lib/chat');
+const live = require('./lib/live');
+const gifs = require('./lib/gifs');
 const { HttpError, newId, cleanText, COLORS } = game;
 
 const PORT = process.env.PORT || 3000;
@@ -18,7 +21,7 @@ const ARCHIVE_PAGE = 30;
 const WORDS = new Set([
   'health', 'groups', 'roster', 'join', 'login', 'logout', 'state', 'archive', 'me', 'polls', 'vote', 'drop',
   'sets', 'questions', 'push', 'subscribe', 'unsubscribe', 'admin', 'players', 'reset', 'settings', 'drop-auto',
-  'unscored', 'scores', 'group', 'code',
+  'unscored', 'scores', 'group', 'code', 'chat', 'read', 'typing', 'events', 'gifs', 'messages',
 ]);
 
 // ---------- Utilitaires HTTP ----------
@@ -139,18 +142,114 @@ function publicPlayer(p) {
   return { id: p.id, name: p.name, emoji: p.emoji, color: p.color, claimed: !!p.userId };
 }
 
+// ---------- Chat ----------
+
+function checkChannel(g, channel) {
+  if (channel === 'general' || g.polls[channel]) return channel;
+  throw new HttpError(404, 'Discussion introuvable');
+}
+
+function msgView(g, m) {
+  return {
+    id: m.seq,
+    channel: m.channel,
+    playerId: g.users[m.userId]?.playerId || null,
+    kind: m.kind,
+    text: m.text,
+    gif: m.gif,
+    at: m.at,
+    deleted: !!m.deleted,
+  };
+}
+
+function readsOf(g, channel) {
+  const out = {};
+  for (const [userId, seq] of Object.entries((g.chatReads || {})[channel] || {})) {
+    const pid = g.users[userId]?.playerId;
+    if (pid) out[pid] = seq;
+  }
+  return out;
+}
+
+function chatSummary(g, me, channel, lastN) {
+  const list = chat.list(g.id, channel).filter((m) => !m.deleted);
+  const read = ((g.chatReads || {})[channel] || {})[me.id] || 0;
+  return {
+    count: list.length,
+    unread: list.filter((m) => m.seq > read && m.userId !== me.id).length,
+    last: list.slice(-lastN).map((m) => msgView(g, m)),
+  };
+}
+
+// Vue d'un sondage + aperçu de sa discussion.
+function pv(g, p, me, now) {
+  return { ...game.pollView(g, p, me, now), chat: chatSummary(g, me, p.id, 2) };
+}
+
+// Liste des discussions : le chat général, puis les sondages qui ont des messages (les plus récents d'abord).
+function chatThreads(g, me) {
+  const threads = [{ channel: 'general', ...chatSummary(g, me, 'general', 1) }];
+  const polls = chat.channels(g.id)
+    .filter((c) => c !== 'general' && g.polls[c])
+    .map((c) => ({ channel: c, text: g.polls[c].text, setId: g.polls[c].setId, ...chatSummary(g, me, c, 1) }))
+    .filter((t) => t.count)
+    .sort((a, b) => b.last[0].at - a.last[0].at)
+    .slice(0, 40);
+  return threads.concat(polls);
+}
+
+function markRead(g, channel, userId, seq) {
+  g.chatReads ||= {};
+  const reads = (g.chatReads[channel] ||= {});
+  if ((reads[userId] || 0) >= seq) return false;
+  reads[userId] = seq;
+  persist();
+  return true;
+}
+
+// Notifications de chat : seulement pour ceux qui n'ont pas l'app ouverte, et au plus une par minute et par discussion.
+const chatPushAt = new Map();
+function notifyChat(g, me, channel, msg) {
+  const author = g.players[me.playerId];
+  const where = channel === 'general' ? g.name : g.polls[channel].text;
+  const body = msg.kind === 'gif' ? 'a envoyé un GIF 🎞️' : msg.text;
+  for (const u of Object.values(g.users)) {
+    if (u.id === me.id || u.disabled || !g.pushSubs[u.id]?.length || live.online(g.id, u.id)) continue;
+    const key = `${g.id}:${u.id}:${channel}`;
+    if (Date.now() - (chatPushAt.get(key) || 0) < 60 * 1000) continue;
+    chatPushAt.set(key, Date.now());
+    push.sendTo(g, u.id, {
+      title: `💬 ${author.name} · ${where.length > 50 ? where.slice(0, 50) + '…' : where}`,
+      body: body.length > 140 ? body.slice(0, 140) + '…' : body,
+      tag: 'chat-' + channel,
+      url: `/?chat=${channel}`,
+    }).catch(() => {});
+  }
+}
+
+// Anti-spam : 15 messages par tranche de 10 secondes.
+const sendTimes = new Map();
+function checkSendRate(userId) {
+  const now = Date.now();
+  const list = (sendTimes.get(userId) || []).filter((t) => now - t < 10000);
+  if (list.length >= 15) throw new HttpError(429, 'Doucement 😅');
+  list.push(now);
+  sendTimes.set(userId, list);
+}
+
 // ---------- Vues ----------
 
 function archiveList(g, me, now, before, setId) {
   const list = Object.values(g.polls)
     .filter((p) => p.endsAt <= now && (!before || p.endsAt < before) && (!setId || p.setId === setId))
     .sort((a, b) => b.endsAt - a.endsAt);
-  return { items: list.slice(0, ARCHIVE_PAGE).map((p) => game.pollView(g, p, me, now)), hasMore: list.length > ARCHIVE_PAGE };
+  return { items: list.slice(0, ARCHIVE_PAGE).map((p) => pv(g, p, me, now)), hasMore: list.length > ARCHIVE_PAGE };
 }
 
 function stateFor(g, me, now) {
-  const live = Object.values(g.polls).filter((p) => p.endsAt > now).sort((a, b) => b.startsAt - a.startsAt);
+  const livePolls = Object.values(g.polls).filter((p) => p.endsAt > now).sort((a, b) => b.startsAt - a.startsAt);
   const archive = archiveList(g, me, now);
+  const threads = chatThreads(g, me);
   return {
     now,
     group: { name: g.name, code: g.code },
@@ -159,9 +258,10 @@ function stateFor(g, me, now) {
     sets: Object.values(g.sets)
       .sort((a, b) => (a.spicy - b.spicy) || (b.builtin - a.builtin) || ((a.order ?? 0) - (b.order ?? 0)) || a.createdAt - b.createdAt)
       .map((s) => game.setView(g, s, me)),
-    live: live.map((p) => game.pollView(g, p, me, now)),
+    live: livePolls.map((p) => pv(g, p, me, now)),
     archive: archive.items,
     archiveHasMore: archive.hasMore,
+    chat: { threads, unread: threads.reduce((n, t) => n + t.unread, 0), gifs: gifs.provider() },
     statDefs: STATS,
     stats: computeStats(g, now),
     settings: g.settings,
@@ -181,7 +281,8 @@ async function api(req, res, url) {
   const method = req.method;
   const parts = url.pathname.split('/').filter(Boolean).slice(1); // sans "api"
   const route = method + ' /' + parts.map((p) => (WORDS.has(p) ? p : ':id')).join('/');
-  const id = parts.find((p) => !WORDS.has(p));
+  const ids = parts.filter((p) => !WORDS.has(p));
+  const id = ids[0];
   const body = ['POST', 'PATCH', 'PUT'].includes(method) ? await readBody(req) : {};
   const ok = (obj = { ok: true }) => send(res, 200, obj);
 
@@ -265,6 +366,68 @@ async function api(req, res, url) {
     case 'GET /state':
       return ok(stateFor(g, me, now));
 
+    case 'GET /events':
+      return live.connect(g.id, me.id, req, res);
+
+    // --- Chat ---
+    case 'GET /chat/:id': {
+      const channel = checkChannel(g, id);
+      const all = chat.list(g.id, channel);
+      const before = Number(url.searchParams.get('before')) || Infinity;
+      const older = all.filter((m) => m.seq < before);
+      const page = older.slice(-50);
+      return ok({ channel, messages: page.map((m) => msgView(g, m)), hasMore: older.length > page.length, reads: readsOf(g, channel) });
+    }
+
+    case 'POST /chat/:id': {
+      const channel = checkChannel(g, id);
+      checkSendRate(me.id);
+      let msg;
+      if (body.gif) {
+        const gif = gifs.cleanGif(body.gif);
+        if (!gif) throw new HttpError(400, 'GIF invalide');
+        msg = { channel, userId: me.id, kind: 'gif', gif };
+      } else {
+        const text = String(body.text || '').replace(/\r/g, '').replace(/\n{3,}/g, '\n\n').trim();
+        if (!text) throw new HttpError(400, 'Message vide');
+        if (text.length > 1000) throw new HttpError(400, 'Message trop long (1000 caractères max)');
+        msg = { channel, userId: me.id, kind: 'text', text };
+      }
+      const saved = chat.add(g.id, msg);
+      markRead(g, channel, me.id, saved.seq);
+      const view = msgView(g, saved);
+      live.emit(g.id, 'msg', view);
+      live.emit(g.id, 'read', { channel, playerId: me.playerId, seq: saved.seq });
+      notifyChat(g, me, channel, saved);
+      return ok({ message: view });
+    }
+
+    case 'POST /chat/:id/read': {
+      const channel = checkChannel(g, id);
+      const last = chat.list(g.id, channel).at(-1);
+      const seq = Math.min(Number(body.seq) || 0, last ? last.seq : 0);
+      if (seq && markRead(g, channel, me.id, seq)) live.emit(g.id, 'read', { channel, playerId: me.playerId, seq }, me.id);
+      return ok();
+    }
+
+    case 'POST /chat/:id/typing':
+      checkChannel(g, id);
+      live.emit(g.id, 'typing', { channel: id, playerId: me.playerId }, me.id);
+      return ok();
+
+    case 'DELETE /chat/:id/messages/:id': {
+      const channel = checkChannel(g, id);
+      const m = chat.get(g.id, Number(ids[1]));
+      if (!m || m.channel !== channel || m.deleted) throw new HttpError(404, 'Message introuvable');
+      if (m.userId !== me.id && !me.isAdmin) throw new HttpError(403, 'Ce n’est pas ton message');
+      chat.remove(g.id, m.seq);
+      live.emit(g.id, 'del', { channel, id: m.seq });
+      return ok();
+    }
+
+    case 'GET /gifs':
+      return ok({ results: await gifs.search(url.searchParams.get('q')) });
+
     case 'GET /archive':
       return ok(archiveList(g, me, now, Number(url.searchParams.get('before')) || 0, url.searchParams.get('set') || null));
 
@@ -282,7 +445,8 @@ async function api(req, res, url) {
       if (!g.players[body.playerId]) throw new HttpError(400, 'Personne inconnue');
       poll.votes[me.id] = body.playerId;
       persist();
-      return ok({ poll: game.pollView(g, poll, me, now) });
+      live.emit(g.id, 'refresh', {}, me.id);
+      return ok({ poll: pv(g, poll, me, now) });
     }
 
     case 'DELETE /polls/:id': {
@@ -291,6 +455,7 @@ async function api(req, res, url) {
       if (!me.isAdmin && poll.droppedBy !== me.id) throw new HttpError(403, 'Seul l’admin ou la personne qui l’a lancé peut le supprimer');
       delete g.polls[id];
       persist();
+      live.emit(g.id, 'refresh', {}, me.id);
       return ok();
     }
 
@@ -304,7 +469,7 @@ async function api(req, res, url) {
         q = game.pickQuestion(g, body.setId || null);
         if (!q) throw new HttpError(400, 'Plus aucune question dispo ici 😢 Ajoutes-en !');
       }
-      return ok({ poll: game.pollView(g, game.createPoll(g, q, now, 'manual', me.id), me, now) });
+      return ok({ poll: pv(g, game.createPoll(g, q, now, 'manual', me.id), me, now) });
     }
 
     // --- Sets & questions ---
@@ -488,7 +653,7 @@ async function api(req, res, url) {
       requireAdmin();
       const q = game.pickQuestion(g);
       if (!q) throw new HttpError(400, 'Plus aucune question dispo');
-      return ok({ poll: game.pollView(g, game.createPoll(g, q, now, 'auto', null), me, now) });
+      return ok({ poll: pv(g, game.createPoll(g, q, now, 'auto', null), me, now) });
     }
 
     case 'GET /admin/unscored': {
@@ -573,9 +738,10 @@ const server = http.createServer(async (req, res) => {
 });
 
 load()
-  .then(() => {
+  .then(async () => {
     const groups = Object.values(store.db.groups);
     const r = game.reloadSeed(groups);
+    const messages = await chat.load();
     push.init();
     setInterval(() => {
       for (const g of Object.values(store.db.groups)) game.tick(g);
@@ -584,6 +750,7 @@ load()
       console.log(`Qui de nous ? → http://localhost:${PORT}`);
       console.log(`questions.md : ${r.sets} sets, ${r.questions} questions${r.added ? ` (${r.added} nouvelles ajoutées aux groupes)` : ''}`);
       console.log(`Groupes : ${groups.length ? groups.map((g) => `${g.name} [${g.code}]`).join(', ') : 'aucun'}`);
+      console.log(`Chat : ${messages} messages · GIFs : ${gifs.enabled() ? 'activés' : 'désactivés (pas de GIPHY_API_KEY / TENOR_API_KEY)'}`);
       console.log(`Stockage : ${store.label}`);
     });
   })
@@ -591,3 +758,11 @@ load()
     console.error('Impossible de charger les données :', e);
     process.exit(1);
   });
+
+// Render envoie SIGTERM avant chaque redéploiement : on sauvegarde avant de partir.
+for (const sig of ['SIGTERM', 'SIGINT']) {
+  process.on(sig, async () => {
+    await flush();
+    process.exit(0);
+  });
+}

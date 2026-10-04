@@ -17,6 +17,12 @@
   let statsPlayer = null;
   let archiveSet = '';
   let archiveExtra = null; // { items, hasMore } quand on filtre / charge plus
+  let liveMode = load('liveMode') === 'archive' ? 'archive' : 'live';
+  if (tab === 'archive') { tab = 'live'; liveMode = 'archive'; }
+  const chats = new Map(); // canal -> { messages, reads, hasMore, loaded }
+  const typing = new Map(); // canal -> Map(playerId -> expire)
+  let chatOpen = null; // canal affiché dans la fenêtre de chat
+  let pendingChat = new URLSearchParams(location.search).get('chat');
   let pollTimer = null;
   let swReg = null;
   let inviteCode = new URLSearchParams(location.search).get('code');
@@ -318,6 +324,9 @@
   function logoutLocal() {
     token = null;
     state = null;
+    stopLive();
+    closeChat(true);
+    chats.clear();
     save('token', null);
     renderAuth('login');
   }
@@ -332,6 +341,12 @@
       state = next;
       renderMain();
       startPolling();
+      startLive();
+      if (pendingChat) {
+        const ch = pendingChat;
+        pendingChat = null;
+        if (ch === 'general' || state.live.some((p) => p.id === ch) || state.archive.some((p) => p.id === ch)) openChat(ch);
+      }
     } catch (e) {
       if (token) toast(e.message);
     }
@@ -342,18 +357,30 @@
     return !$sheet.hidden || (a && ['INPUT', 'TEXTAREA', 'SELECT'].includes(a.tagName));
   }
 
+  async function softRefresh() {
+    if (!token) return;
+    try {
+      const next = await api('GET', 'state');
+      const changed = JSON.stringify({ ...next, now: 0 }) !== JSON.stringify({ ...state, now: 0 });
+      state = next;
+      if (busy() || !changed) renderNav();
+      else renderMain();
+      if (chatOpen) renderChatHeader();
+    } catch { /* on réessaiera */ }
+  }
+
+  // Les événements temps réel déclenchent un rafraîchissement groupé de l'état.
+  let softTimer = null;
+  function scheduleRefresh() {
+    clearTimeout(softTimer);
+    softTimer = setTimeout(softRefresh, 500);
+  }
+
   function startPolling() {
     if (pollTimer) return;
-    pollTimer = setInterval(async () => {
-      if (document.hidden || !token) return;
-      try {
-        const next = await api('GET', 'state');
-        const changed = JSON.stringify({ ...next, now: 0 }) !== JSON.stringify({ ...state, now: 0 });
-        state = next;
-        if (busy() || !changed) renderNav();
-        else renderMain();
-      } catch { /* on réessaiera */ }
-    }, 15000);
+    pollTimer = setInterval(() => {
+      if (!document.hidden) softRefresh();
+    }, 30000);
   }
 
   function stopPolling() {
@@ -362,7 +389,11 @@
   }
 
   document.addEventListener('visibilitychange', () => {
-    if (!document.hidden && token && state) refresh();
+    if (document.hidden) stopLive();
+    else if (token && state) {
+      refresh();
+      if (chatOpen) loadChat(chatOpen, true);
+    }
   });
 
   // ---------- Squelette ----------
@@ -391,9 +422,10 @@
 
   function renderNav() {
     const n = todoCount();
+    const unread = state.chat.unread;
     const items = [
       ['live', '🗳️', 'Live', n],
-      ['archive', '📜', 'Archives', 0],
+      ['chat', '💬', 'Chat', unread],
       ['sets', '📚', 'Sets', 0],
       ['stats', '📊', 'Stats', 0],
       ['me', '🙂', 'Moi', 0],
@@ -408,7 +440,8 @@
         </button>`)
       .join('');
     nav.querySelectorAll('[data-tab]').forEach((b) => (b.onclick = () => go(b.dataset.tab)));
-    document.title = n ? `(${n}) Qui de nous ?` : 'Qui de nous ?';
+    document.title = n + unread ? `(${n + unread}) Qui de nous ?` : 'Qui de nous ?';
+    if (navigator.setAppBadge) navigator.setAppBadge(n + unread).catch(() => {});
   }
 
   function go(t) {
@@ -424,7 +457,7 @@
   function renderView() {
     const view = document.getElementById('view');
     if (!view) return;
-    ({ live: renderLive, archive: renderArchive, sets: renderSets, stats: renderStats, me: renderMe }[tab] || renderLive)(view);
+    ({ live: renderLive, chat: renderChatList, sets: renderSets, stats: renderStats, me: renderMe }[tab] || renderLive)(view);
   }
 
   // ---------- Cartes de sondage ----------
@@ -488,7 +521,20 @@
           ${actions.join('')}
         </div>
         <div class="byline">${by ? `Lancée par ${esc(by.name)}` : '🎲 Drop auto'} · ${ago(p.startsAt)}</div>
+        ${pollChatPreview(p)}
       </article>`;
+  }
+
+  function pollChatPreview(p) {
+    const c = p.chat || { count: 0, unread: 0, last: [] };
+    const lines = c.last.map((m) => {
+      const u = player(m.playerId);
+      return `<div class="pc-line">${avatar(u, 'xs')}<b>${esc(u.name)}</b><span>${m.kind === 'gif' ? '🎞️ GIF' : esc(m.text)}</span></div>`;
+    }).join('');
+    const label = c.count
+      ? `💬 ${c.count > 2 ? `Voir les ${c.count} messages` : 'Répondre'}${c.unread ? ` <span class="pc-new">${c.unread} nouveau${c.unread > 1 ? 'x' : ''}</span>` : ''}`
+      : '💬 Commenter';
+    return `<button class="poll-chat" data-chat="${p.id}">${lines}<span class="pc-open">${label}</span></button>`;
   }
 
   function bindPollCards(view, list) {
@@ -507,6 +553,7 @@
         }
       };
     });
+    view.querySelectorAll('[data-chat]').forEach((b) => (b.onclick = () => openChat(b.dataset.chat)));
     view.querySelectorAll('[data-edit]').forEach((b) => (b.onclick = () => { editing = b.dataset.edit; renderView(); }));
     view.querySelectorAll('[data-cancel]').forEach((b) => (b.onclick = () => { editing = null; renderView(); }));
     view.querySelectorAll('[data-del]').forEach((b) => {
@@ -530,7 +577,25 @@
 
   // ---------- Live ----------
 
+  function liveSwitch() {
+    return `
+      <div class="seg live-seg">
+        <button type="button" data-live="live" class="${liveMode === 'live' ? 'on' : ''}">⏳ En cours${state.live.length ? ` (${state.live.length})` : ''}</button>
+        <button type="button" data-live="archive" class="${liveMode === 'archive' ? 'on' : ''}">📜 Archives</button>
+      </div>`;
+  }
+
+  function bindLiveSwitch(view) {
+    view.querySelectorAll('[data-live]').forEach((b) => (b.onclick = () => {
+      liveMode = b.dataset.live;
+      save('liveMode', liveMode);
+      renderView();
+      window.scrollTo({ top: 0 });
+    }));
+  }
+
   function renderLive(view) {
+    if (liveMode === 'archive') return renderArchive(view);
     const todo = state.live.filter((p) => !p.myVote);
     const done = state.live.filter((p) => p.myVote);
     const next = state.nextDrop
@@ -539,6 +604,7 @@
 
     view.innerHTML = `
       ${installBanner()}
+      ${liveSwitch()}
       <div class="next-drop">
         <span>⏰ ${next}</span>
         <span class="muted">${plural(state.remainingQuestions, 'question')} en réserve</span>
@@ -554,6 +620,7 @@
       <button class="fab" id="fab" aria-label="Lancer une question">＋</button>`;
 
     bindPollCards(view);
+    bindLiveSwitch(view);
     bindInstallBanner();
     document.getElementById('fab').onclick = () => openDropSheet();
   }
@@ -676,6 +743,7 @@
   function renderArchive(view) {
     const data = archiveExtra || { items: state.archive, hasMore: state.archiveHasMore };
     view.innerHTML = `
+      ${liveSwitch()}
       <div class="filter-row">
         <select class="input" id="archSet">
           <option value="">Tous les sets</option>
@@ -686,6 +754,7 @@
       ${data.hasMore ? '<button class="btn btn-soft btn-block" id="more">Voir plus</button>' : ''}`;
 
     bindPollCards(view);
+    bindLiveSwitch(view);
     document.getElementById('archSet').onchange = async (e) => {
       archiveSet = e.target.value;
       try {
@@ -1091,6 +1160,439 @@
     });
   }
 
+  // ---------- Temps réel ----------
+
+  let liveCtrl = null;
+  let liveRetry = null;
+
+  function startLive() {
+    if (liveCtrl || !token || document.hidden) return;
+    const ctrl = new AbortController();
+    liveCtrl = ctrl;
+    (async () => {
+      try {
+        const res = await fetch('/api/events', { headers: { Authorization: 'Bearer ' + token }, signal: ctrl.signal });
+        if (!res.ok || !res.body) throw new Error('live');
+        if (chatOpen) loadChat(chatOpen, true); // rattrape ce qui a pu être manqué
+        const reader = res.body.getReader();
+        const dec = new TextDecoder();
+        let buf = '';
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buf += dec.decode(value, { stream: true });
+          let i;
+          while ((i = buf.indexOf('\n\n')) >= 0) {
+            const chunk = buf.slice(0, i);
+            buf = buf.slice(i + 2);
+            const type = (chunk.match(/^event: (.*)$/m) || [])[1];
+            const data = (chunk.match(/^data: (.*)$/m) || [])[1];
+            if (type && data) {
+              try { onLive(type, JSON.parse(data)); } catch (e) { console.error(e); }
+            }
+          }
+        }
+      } catch { /* connexion coupée */ }
+      if (liveCtrl === ctrl) {
+        liveCtrl = null;
+        if (!ctrl.signal.aborted && token && !document.hidden) {
+          clearTimeout(liveRetry);
+          liveRetry = setTimeout(startLive, 3000);
+        }
+      }
+    })();
+  }
+
+  function stopLive() {
+    clearTimeout(liveRetry);
+    if (liveCtrl) {
+      liveCtrl.abort();
+      liveCtrl = null;
+    }
+  }
+
+  function onLive(type, d) {
+    if (type === 'refresh') return scheduleRefresh();
+    const c = chats.get(d.channel);
+    if (type === 'msg') {
+      if (c && !c.messages.some((m) => m.id === d.id)) c.messages.push(d);
+      typing.get(d.channel)?.delete(d.playerId);
+      if (chatOpen === d.channel) {
+        renderChatMessages();
+        renderTyping();
+        markReadSoon();
+      }
+      scheduleRefresh();
+    } else if (type === 'typing') {
+      if (!typing.has(d.channel)) typing.set(d.channel, new Map());
+      typing.get(d.channel).set(d.playerId, Date.now() + 4500);
+      if (chatOpen === d.channel) renderTyping();
+      setTimeout(() => { if (chatOpen === d.channel) renderTyping(); }, 4600);
+    } else if (type === 'read') {
+      if (c) {
+        c.reads[d.playerId] = Math.max(c.reads[d.playerId] || 0, d.seq);
+        if (chatOpen === d.channel) renderChatMessages();
+      }
+    } else if (type === 'del') {
+      const m = c && c.messages.find((x) => x.id === d.id);
+      if (m) {
+        m.deleted = true;
+        delete m.text;
+        delete m.gif;
+        if (chatOpen === d.channel) renderChatMessages();
+      }
+      scheduleRefresh();
+    }
+  }
+
+  // ---------- Chat : liste des discussions ----------
+
+  function lastLine(t) {
+    const m = t.last[0];
+    if (!m) return '<i>Aucun message : lance la discussion !</i>';
+    const who = m.playerId === state.me.playerId ? 'Toi' : esc(player(m.playerId).name);
+    return `${who} : ${m.deleted ? '<i>message supprimé</i>' : m.kind === 'gif' ? '🎞️ GIF' : esc(m.text)}`;
+  }
+
+  function renderChatList(view) {
+    const [general, ...others] = state.chat.threads;
+    const row = (t, title, icon) => `
+      <button class="thread ${t.unread ? 'unread' : ''}" data-thread="${t.channel}">
+        <span class="thread-icon">${icon}</span>
+        <span class="thread-main"><span class="thread-title">${title}</span><span class="thread-last">${lastLine(t)}</span></span>
+        <span class="thread-side">
+          ${t.last[0] ? `<span class="small muted">${ago(t.last[0].at)}</span>` : ''}
+          ${t.unread ? `<span class="thread-badge">${t.unread}</span>` : ''}
+        </span>
+      </button>`;
+    view.innerHTML = `
+      <div class="section-title" style="margin-top:4px">💬 Le groupe</div>
+      <div class="card threads">${row(general, 'Chat du groupe', '👥')}</div>
+      <div class="section-title">🗳️ Sur les sondages</div>
+      ${others.length
+        ? `<div class="card threads">${others.map((t) => row(t, esc(t.text), esc(setOf(t.setId).emoji))).join('')}</div>`
+        : '<div class="card empty" style="padding:18px">Les discussions sur les questions apparaîtront ici.<br>Commente un sondage depuis l’onglet Live 💬</div>'}`;
+    view.querySelectorAll('[data-thread]').forEach((b) => (b.onclick = () => openChat(b.dataset.thread)));
+  }
+
+  // ---------- Chat : fenêtre de discussion ----------
+
+  const $chat = document.getElementById('chatOverlay');
+  let gifTimer = null;
+  let lastTypingSent = 0;
+  let readTimer = null;
+
+  const tz = () => state.settings.timezone;
+  const dayKey = (t) => new Date(t).toLocaleDateString('fr-FR', { timeZone: tz() });
+  const hhmm = (t) => new Date(t).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', timeZone: tz() });
+  function dayLabel(t) {
+    if (dayKey(t) === dayKey(now())) return 'Aujourd’hui';
+    if (dayKey(t) === dayKey(now() - 86400000)) return 'Hier';
+    return new Date(t).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', timeZone: tz() });
+  }
+
+  function findPoll(id) {
+    return [...state.live, ...state.archive, ...((archiveExtra && archiveExtra.items) || [])].find((p) => p.id === id);
+  }
+
+  function openChat(channel) {
+    if (chatOpen) closeChat(true);
+    chatOpen = channel;
+    const gifLabel = state.chat.gifs === 'tenor' ? 'Rechercher sur Tenor' : 'Rechercher un GIF…';
+    $chat.innerHTML = `
+      <div class="chat-head">
+        <button class="chat-back" id="chatBack" aria-label="Retour">←</button>
+        <div class="chat-title" id="chatTitle"></div>
+      </div>
+      <div class="chat-list" id="chatList"><div class="chat-empty">Chargement…</div></div>
+      <div class="chat-typing" id="chatTyping"></div>
+      <div class="gif-panel" id="gifPanel" hidden>
+        <input class="input" id="gifSearch" placeholder="${gifLabel}" autocomplete="off" enterkeyhint="search">
+        <div class="gif-grid" id="gifGrid"></div>
+        ${state.chat.gifs === 'giphy' ? '<div class="gif-credit">Powered by GIPHY</div>' : ''}
+      </div>
+      <form class="chat-input" id="chatForm">
+        <button type="button" class="gif-btn" id="gifBtn">GIF</button>
+        <textarea id="chatText" rows="1" maxlength="1000" placeholder="Message…" enterkeyhint="send"></textarea>
+        <button type="submit" class="send-btn" aria-label="Envoyer">➤</button>
+      </form>`;
+    $chat.hidden = false;
+    document.body.classList.add('noscroll');
+    history.pushState({ chat: channel }, '');
+    renderChatHeader();
+    fitChat();
+
+    document.getElementById('chatBack').onclick = () => closeChat();
+    const text = document.getElementById('chatText');
+    const form = document.getElementById('chatForm');
+    const grow = () => {
+      text.style.height = 'auto';
+      text.style.height = Math.min(text.scrollHeight, 120) + 'px';
+    };
+    text.oninput = () => {
+      grow();
+      if (text.value.trim() && Date.now() - lastTypingSent > 2500) {
+        lastTypingSent = Date.now();
+        api('POST', `chat/${channel}/typing`).catch(() => {});
+      }
+    };
+    text.onkeydown = (e) => {
+      if (e.key === 'Enter' && !e.shiftKey && !window.matchMedia('(pointer: coarse)').matches) {
+        e.preventDefault();
+        form.requestSubmit();
+      }
+    };
+    text.onfocus = () => {
+      toggleGif(false);
+      setTimeout(() => scrollChatBottom(), 300);
+    };
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      const value = text.value.trim();
+      if (!value) return;
+      text.value = '';
+      grow();
+      lastTypingSent = 0;
+      try {
+        await sendChat({ text: value });
+      } catch (err) {
+        text.value = value;
+        grow();
+        toast(err.message);
+      }
+    };
+    document.getElementById('gifBtn').onclick = () => toggleGif();
+    document.getElementById('gifSearch').oninput = (e) => {
+      clearTimeout(gifTimer);
+      gifTimer = setTimeout(() => searchGifs(e.target.value), 400);
+    };
+    loadChat(channel);
+  }
+
+  function closeChat(silent) {
+    if (!chatOpen) return;
+    chatOpen = null;
+    $chat.hidden = true;
+    $chat.innerHTML = '';
+    document.body.classList.remove('noscroll');
+    if (!silent && history.state && history.state.chat) history.back();
+    if (state) {
+      renderNav();
+      renderView();
+    }
+  }
+
+  window.addEventListener('popstate', () => {
+    if (chatOpen) closeChat(true);
+  });
+
+  // Sur mobile, le clavier réduit la zone visible : la fenêtre de chat suit.
+  function fitChat() {
+    if (!chatOpen || !window.visualViewport) return;
+    $chat.style.height = window.visualViewport.height + 'px';
+    $chat.style.top = window.visualViewport.offsetTop + 'px';
+  }
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', fitChat);
+    window.visualViewport.addEventListener('scroll', fitChat);
+  }
+
+  function renderChatHeader() {
+    const el = document.getElementById('chatTitle');
+    if (!el) return;
+    if (chatOpen === 'general') {
+      el.innerHTML = `<b>Chat du groupe</b><span>${esc(state.group.name)} · ${plural(state.players.filter((p) => p.claimed).length, 'membre')}</span>`;
+      return;
+    }
+    const p = findPoll(chatOpen);
+    const t = state.chat.threads.find((x) => x.channel === chatOpen);
+    const s = setOf((p || t || {}).setId);
+    const status = p ? (p.ended ? 'terminé' : '⏳ ' + left(p.endsAt)) : '';
+    el.innerHTML = `<b class="clamp2">${esc((p || t || { text: 'Discussion' }).text)}</b><span>${esc(s.emoji)} ${esc(s.name)}${status ? ' · ' + status : ''}</span>`;
+  }
+
+  async function loadChat(channel, force) {
+    const c = chats.get(channel);
+    if (c && c.loaded && !force) {
+      renderChatMessages(true);
+      markReadSoon();
+      return;
+    }
+    try {
+      const r = await api('GET', `chat/${channel}`);
+      chats.set(channel, { messages: r.messages, reads: r.reads, hasMore: r.hasMore, loaded: true });
+      if (chatOpen === channel) {
+        renderChatMessages(true);
+        markReadSoon();
+      }
+    } catch (e) {
+      toast(e.message);
+    }
+  }
+
+  function scrollChatBottom() {
+    const list = document.getElementById('chatList');
+    if (list) list.scrollTop = list.scrollHeight;
+  }
+
+  function renderChatMessages(forceBottom) {
+    const list = document.getElementById('chatList');
+    const c = chats.get(chatOpen);
+    if (!list || !c) return;
+    const atBottom = forceBottom || list.scrollHeight - list.scrollTop - list.clientHeight < 120;
+    const myPid = state.me.playerId;
+
+    // Accusés de lecture : chaque personne apparaît sous le dernier message qu'elle a lu.
+    const readAt = new Map();
+    for (const [pid, seq] of Object.entries(c.reads)) {
+      if (pid === myPid) continue;
+      let target = null;
+      for (const m of c.messages) {
+        if (m.id <= seq) target = m;
+        else break;
+      }
+      if (!target || target.playerId === pid) continue;
+      if (!readAt.has(target.id)) readAt.set(target.id, []);
+      readAt.get(target.id).push(pid);
+    }
+
+    let html = c.hasMore ? '<button class="chat-older" id="chatOlder">Messages précédents</button>' : '';
+    if (!c.messages.length) {
+      html += `<div class="chat-empty">${chatOpen === 'general' ? 'Aucun message pour l’instant. Dis bonjour 👋' : 'Personne n’a encore commenté. Lance le débat 🔥'}</div>`;
+    }
+    c.messages.forEach((m, i) => {
+      const prev = c.messages[i - 1];
+      const next = c.messages[i + 1];
+      const mine = m.playerId === myPid;
+      const u = player(m.playerId);
+      const newDay = !prev || dayKey(prev.at) !== dayKey(m.at);
+      if (newDay) html += `<div class="chat-day">${dayLabel(m.at)}</div>`;
+      const first = newDay || prev.playerId !== m.playerId || m.at - prev.at > 5 * 60000;
+      const last = !next || next.playerId !== m.playerId || next.at - m.at > 5 * 60000 || dayKey(next.at) !== dayKey(m.at);
+      const content = m.deleted
+        ? '<i>Message supprimé</i>'
+        : m.kind === 'gif'
+          ? `<img src="${esc(m.gif.url)}" width="${m.gif.w}" height="${m.gif.h}" alt="GIF" loading="lazy">`
+          : esc(m.text);
+      const canDelete = !m.deleted && (mine || state.me.isAdmin);
+      html += `
+        <div class="msg ${mine ? 'mine' : ''} ${first ? 'first' : ''} ${last ? 'last' : ''}">
+          ${mine ? '' : last ? avatar(u, 'sm') : '<span class="avatar-space"></span>'}
+          <div class="msg-body">
+            ${!mine && first ? `<div class="msg-name">${esc(u.name)}</div>` : ''}
+            <div class="bubble ${m.kind === 'gif' && !m.deleted ? 'gif' : ''} ${m.deleted ? 'deleted' : ''}" ${canDelete ? `data-delmsg="${m.id}"` : ''}>${content}</div>
+            ${last ? `<div class="msg-time">${hhmm(m.at)}</div>` : ''}
+          </div>
+        </div>`;
+      const readers = readAt.get(m.id);
+      if (readers) html += `<div class="read-row ${mine ? 'mine' : ''}" title="Vu par ${esc(readers.map((pid) => player(pid).name).join(', '))}">${readers.map((pid) => avatar(player(pid), 'xs')).join('')}</div>`;
+    });
+    list.innerHTML = html;
+
+    list.querySelectorAll('img').forEach((img) => (img.onload = () => { if (atBottom) scrollChatBottom(); }));
+    list.querySelectorAll('[data-delmsg]').forEach((b) => {
+      b.onclick = async () => {
+        if (!confirm('Supprimer ce message ?')) return;
+        try {
+          await api('DELETE', `chat/${chatOpen}/messages/${b.dataset.delmsg}`);
+        } catch (e) { toast(e.message); }
+      };
+    });
+    const older = document.getElementById('chatOlder');
+    if (older) {
+      action(older, async () => {
+        const channel = chatOpen;
+        const r = await api('GET', `chat/${channel}?before=${c.messages[0].id}`);
+        c.messages = r.messages.concat(c.messages);
+        c.hasMore = r.hasMore;
+        const prevHeight = list.scrollHeight;
+        renderChatMessages();
+        list.scrollTop = list.scrollHeight - prevHeight;
+      });
+    }
+    if (atBottom) scrollChatBottom();
+  }
+
+  function renderTyping() {
+    const el = document.getElementById('chatTyping');
+    if (!el) return;
+    const t = typing.get(chatOpen);
+    const who = t ? [...t].filter(([, exp]) => exp > Date.now()).map(([pid]) => player(pid).name) : [];
+    el.innerHTML = who.length
+      ? `<span class="dots"><i></i><i></i><i></i></span>${esc(who.length === 1 ? `${who[0]} écrit…` : who.length === 2 ? `${who[0]} et ${who[1]} écrivent…` : 'Plusieurs personnes écrivent…')}`
+      : '';
+  }
+
+  function markReadSoon() {
+    clearTimeout(readTimer);
+    readTimer = setTimeout(() => {
+      const channel = chatOpen;
+      const c = chats.get(channel);
+      if (!c || document.hidden || !c.messages.length) return;
+      const lastId = c.messages[c.messages.length - 1].id;
+      if ((c.reads[state.me.playerId] || 0) >= lastId) return;
+      c.reads[state.me.playerId] = lastId;
+      api('POST', `chat/${channel}/read`, { seq: lastId }).then(scheduleRefresh).catch(() => {});
+    }, 300);
+  }
+
+  async function sendChat(body) {
+    const channel = chatOpen;
+    const { message } = await api('POST', `chat/${channel}`, body);
+    const c = chats.get(channel);
+    if (c) {
+      if (!c.messages.some((m) => m.id === message.id)) c.messages.push(message);
+      c.reads[state.me.playerId] = message.id;
+    }
+    if (chatOpen === channel) renderChatMessages(true);
+  }
+
+  function toggleGif(force) {
+    const panel = document.getElementById('gifPanel');
+    const btn = document.getElementById('gifBtn');
+    if (!panel) return;
+    const open = force === undefined ? panel.hidden : force;
+    panel.hidden = !open;
+    btn.classList.toggle('on', open);
+    if (!open) return;
+    if (!state.chat.gifs) {
+      document.getElementById('gifGrid').innerHTML = '<p class="muted small gif-msg">Les GIFs ne sont pas encore activés sur le serveur (il manque une clé GIPHY).</p>';
+      return;
+    }
+    document.getElementById('chatText').blur();
+    searchGifs(document.getElementById('gifSearch').value);
+  }
+
+  async function searchGifs(q) {
+    const grid = document.getElementById('gifGrid');
+    if (!grid) return;
+    grid.innerHTML = '<p class="muted small gif-msg">Chargement…</p>';
+    try {
+      const { results } = await api('GET', 'gifs?q=' + encodeURIComponent(q.trim()));
+      if (!document.getElementById('gifGrid')) return;
+      grid.innerHTML = results.length
+        ? results.map((r, i) => `<button type="button" class="gif-item" data-gif="${i}"><img src="${esc(r.preview)}" alt="GIF" loading="lazy"></button>`).join('')
+        : '<p class="muted small gif-msg">Aucun GIF trouvé 🤷</p>';
+      grid.querySelectorAll('[data-gif]').forEach((b) => {
+        action(b, async () => {
+          const r = results[Number(b.dataset.gif)];
+          await sendChat({ gif: { url: r.url, w: r.w, h: r.h } });
+          toggleGif(false);
+        });
+      });
+    } catch (e) {
+      grid.innerHTML = `<p class="muted small gif-msg">${esc(e.message)}</p>`;
+    }
+  }
+
+  // Clic sur une notification alors que l'app est déjà ouverte.
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.addEventListener('message', (e) => {
+      const ch = e.data && e.data.type === 'open' && new URL(e.data.url, location.origin).searchParams.get('chat');
+      if (ch && state) openChat(ch);
+    });
+  }
+
   // ---------- Notifications push ----------
 
   function b64ToBytes(b64) {
@@ -1136,10 +1638,8 @@
 
   // ---------- Démarrage ----------
 
-  if (inviteCode) {
-    save('code', inviteCode.toUpperCase());
-    history.replaceState(null, '', '/');
-  }
+  if (inviteCode) save('code', inviteCode.toUpperCase());
+  if (inviteCode || pendingChat) history.replaceState(null, '', '/');
   if (token) {
     inviteCode = null;
     $app.innerHTML = '<div class="auth"><span class="logo-emoji">🤔</span></div>';

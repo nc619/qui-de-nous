@@ -25,7 +25,12 @@ self.addEventListener('notificationclick', (event) => {
   const url = (event.notification.data && event.notification.data.url) || '/';
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
-      for (const c of list) if ('focus' in c) return c.focus();
+      for (const c of list) {
+        if ('focus' in c) {
+          c.postMessage({ type: 'open', url }); // l'app ouvre la bonne discussion sans recharger
+          return c.focus();
+        }
+      }
       return self.clients.openWindow(url);
     })
   );
