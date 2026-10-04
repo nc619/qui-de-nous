@@ -936,13 +936,14 @@
         ${state.players.map((u) => `<button class="strip-item ${u.id === pid ? 'on' : ''}" data-player="${u.id}">${avatar(u)}<span>${esc(u.name)}</span></button>`).join('')}
       </div>
       <div class="card radar-card">
-        <div class="radar-title">${avatar(p)}<div><b>${esc(p.name)}</b><div class="muted small">${plural(ps.polls, 'sondage')} où iel a reçu des votes</div></div></div>
+        <div class="radar-title">${avatar(p)}<div><b>${esc(p.name)}</b><div class="muted small">A reçu des votes dans ${plural(ps.polls, 'sondage')} terminé${ps.polls > 1 ? 's' : ''}</div></div></div>
         ${anyData ? window.radarSvg(defs, ps.value, p.color, active.length > 1 ? avg : null) : '<div class="empty">📊<br>Les stats arrivent quand les premiers sondages se terminent.</div>'}
         ${anyData && active.length > 1 ? '<div class="legend"><span class="dash"></span> moyenne du groupe</div>' : ''}
         ${myTitles.length ? `<div class="title-chips">${myTitles.map((t) => `<span class="title-chip ${t.low ? 'low' : ''}">${t.emoji} ${esc(t.title)}</span>`).join('')}</div>` : ''}
+        ${anyData && st.ended < st.titlesAt ? `<p class="muted small" style="margin:10px 0 0">🔒 Les titres se débloquent après ${st.titlesAt} sondages terminés (encore ${st.titlesAt - st.ended}).</p>` : ''}
       </div>
       ${ps.wins.length ? `
-        <div class="section-title">🏅 Élu·e pour… <span class="count">${ps.wins.length}</span></div>
+        <div class="section-title">🏅 Élu pour… <span class="count">${ps.wins.length}</span></div>
         <div class="card qlist">${ps.wins.slice(0, 15).map((w) => `<div class="qrow"><span>${esc(w.text)}</span><span class="muted small">${esc(setOf(w.setId).emoji)}</span></div>`).join('')}</div>` : ''}
       ${st.titles.length ? `
         <div class="section-title">🏆 Les titres du groupe</div>
@@ -1138,7 +1139,7 @@
     action(document.getElementById('exportQ'), async () => {
       const { questions } = await api('GET', 'admin/unscored');
       if (!questions.length) return toast('Rien à noter, tout est à jour ✅');
-      const text = 'Questions « Qui de nous ? » à noter (stats : chaos, hot, cerveau, genance, toxique, exces ; 1 à 3 stats par question, valeurs -2 à 3). Réponds en JSON {"id": {"stat": valeur}}.\n\n' + JSON.stringify(questions, null, 1);
+      const text = 'Questions « Qui de nous ? » à noter (stats : chaos, hot, coeur, cerveau, genance, toxique, exces ; 1 à 3 stats par question, valeurs -2 à 3). Réponds en JSON {"id": {"stat": valeur}}.\n\n' + JSON.stringify(questions, null, 1);
       try {
         await navigator.clipboard.writeText(text);
         toast(`${plural(questions.length, 'question')} copiée${questions.length > 1 ? 's' : ''} 📋`);
