@@ -1653,3 +1653,15 @@ main { padding-top: 10px; }
 [data-theme="dark"] .bubble { box-shadow: none; }
 [data-theme="dark"] .msg:not(.mine) .bubble:not(.gif):not(.deleted) { background: var(--soft); }
 [data-theme="dark"] .top { box-shadow: none; }
+
+/* Lignes repliées : gagnant + barre de répartition des votes */
+.prow-body { gap: 3px; }
+.prow-lead { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 0.8rem; }
+.prow-lead b { font-weight: 600; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-shrink: 0; }
+.prow-avs { display: flex; flex-shrink: 0; }
+.prow-avs .avatar.xs { width: 20px; height: 20px; font-size: 0.7rem; }
+.prow-avs .avatar.xs + .avatar.xs { margin-left: -6px; box-shadow: 0 0 0 1.5px var(--card); }
+.prow-bar { flex: 1; min-width: 30px; display: flex; gap: 2px; height: 6px; border-radius: 3px; overflow: hidden; background: var(--soft); }
+.prow-bar i { display: block; height: 100%; min-width: 3px; }
+.prow-pct { flex-shrink: 0; font-size: 0.75rem; font-weight: 700; color: var(--muted); font-variant-numeric: tabular-nums; width: 32px; text-align: right; }
+.prow-meta { font-size: 0.72rem; }

@@ -614,13 +614,18 @@
     const leaders = counts.filter(([, c]) => c === max).map(([id]) => player(id));
     const author = p.custom && p.authorId ? player(p.authorId) : null;
     const c = p.chat || { count: 0, unread: 0 };
-    let lead;
-    if (!leaders.length) lead = 'Personne n’a voté';
-    else if (leaders.length === 1) lead = `<b>${esc(leaders[0].name)}</b>${p.ended ? '' : ' en tête'}`;
-    else lead = `<b>${leaders.map((u) => esc(u.name)).join(', ')}</b> ex æquo`;
+    const total = counts.reduce((n, [, x]) => n + x, 0);
+    // Le gagnant en avatar + nom + %, et une barre qui montre la répartition des votes (gagnant en couleur vive).
+    const lead = leaders.length
+      ? `<span class="prow-lead">
+          <span class="prow-avs">${leaders.slice(0, 2).map((u) => avatar(u, 'xs')).join('')}</span>
+          <b>${esc(leaders.length === 1 ? leaders[0].name : leaders.length === 2 ? `${leaders[0].name}, ${leaders[1].name}` : `${leaders.length} ex æquo`)}</b>
+          <span class="prow-bar">${counts.map(([id, x]) => `<i style="flex:${x};background:${esc(player(id).color)};${x === max ? '' : 'opacity:.3'}"></i>`).join('')}</span>
+          <span class="prow-pct">${Math.round((max / total) * 100)}%</span>
+        </span>`
+      : '<span class="prow-lead muted">Personne n’a voté</span>';
     const meta = [
-      lead,
-      `${p.voterIds.length}/${state.players.length}`,
+      `${plural(p.voterIds.length, 'vote')}`,
       p.ended ? ago(p.endsAt) : `encore ${left(p.endsAt)}`,
     ];
     return `
@@ -628,6 +633,7 @@
         <span class="prow-set ${setOf(p.setId).spicy ? 'spicy' : ''}" title="${esc(setOf(p.setId).name)}">${esc(setOf(p.setId).emoji)}</span>
         <span class="prow-body">
           <span class="prow-q">${esc(p.text)}</span>
+          ${lead}
           <span class="prow-meta">${author ? `<span class="prow-by">${icon('pen')}${esc(author.name)}</span>` : ''}${meta.join(' · ')}</span>
         </span>
         ${c.count ? `<span class="prow-chat ${c.unread ? 'new' : ''}">${icon('comment')}${c.unread || c.count}</span>` : ''}
