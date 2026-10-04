@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { store, load, persist, flush, newGroup, newCode } = require('./lib/store');
-const { latestSlot, nextSlot, isValidTimezone } = require('./lib/schedule');
+const { latestSlot, nextSlot, isValidTimezone, zonedParts } = require('./lib/schedule');
 const { STATS, parseWeights, computeStats } = require('./lib/stats');
 const push = require('./lib/push');
 const game = require('./lib/game');
@@ -21,8 +21,26 @@ const ARCHIVE_PAGE = 30;
 const WORDS = new Set([
   'health', 'groups', 'roster', 'join', 'login', 'logout', 'state', 'archive', 'me', 'polls', 'vote', 'drop',
   'sets', 'questions', 'push', 'subscribe', 'unsubscribe', 'admin', 'players', 'reset', 'settings', 'drop-auto',
-  'unscored', 'scores', 'group', 'code', 'chat', 'read', 'typing', 'events', 'gifs', 'messages',
+  'unscored', 'scores', 'group', 'code', 'chat', 'read', 'typing', 'events', 'gifs', 'messages', 'presence', 'test',
 ]);
+
+// Questions en plus lancées à la main (bouton +) : 3 par personne et par jour, remise à zéro à minuit
+// dans le fuseau du groupe (Paris par défaut).
+const DAILY_DROPS = 3;
+const dayKey = (t, tz) => {
+  const p = zonedParts(t, tz);
+  return `${p.year}-${p.month}-${p.day}`;
+};
+function dropsLeft(g, userId, now) {
+  const today = dayKey(now, g.settings.timezone);
+  const used = ((g.dropLog || {})[userId] || []).filter((t) => dayKey(t, g.settings.timezone) === today).length;
+  return Math.max(0, DAILY_DROPS - used);
+}
+function logDrop(g, userId, now) {
+  g.dropLog ||= {};
+  const today = dayKey(now, g.settings.timezone);
+  g.dropLog[userId] = (g.dropLog[userId] || []).filter((t) => dayKey(t, g.settings.timezone) === today).concat(now);
+}
 
 // ---------- Utilitaires HTTP ----------
 
@@ -214,8 +232,8 @@ function notifyChat(g, me, channel, msg) {
   const author = g.players[me.playerId];
   const where = channel === 'general' ? 'Chat du groupe' : short(g.polls[channel].text, 60);
   push.notify(g, 'chat', {
-    title: `💬 ${author.name} · ${where}`,
-    body: msg.kind === 'gif' ? 'A envoyé un GIF 🎞️' : short(msg.text, 160),
+    title: `${author.name} · ${where}`,
+    body: msg.kind === 'gif' ? 'A envoyé un GIF' : short(msg.text, 160),
     tag: 'chat-' + channel,
     url: `/?chat=${channel}`,
   }, me.id);
@@ -226,7 +244,7 @@ function notifyVote(g, me, poll) {
   const author = g.players[me.playerId];
   const voters = Object.keys(poll.votes).length;
   push.notify(g, 'votes', {
-    title: `🗳️ ${author.name} a voté`,
+    title: `${author.name} a voté`,
     body: `${short(poll.text, 120)} · ${voters}/${Object.keys(g.players).length} ${voters > 1 ? 'ont' : 'a'} voté`,
     tag: 'votes-' + poll.id,
     url: '/',
@@ -259,7 +277,7 @@ function stateFor(g, me, now) {
   return {
     now,
     group: { name: g.name, code: g.code },
-    me: { userId: me.id, playerId: me.playerId, isAdmin: !!me.isAdmin, notif: push.prefs(me) },
+    me: { userId: me.id, playerId: me.playerId, isAdmin: !!me.isAdmin, notif: push.prefs(me), dropsLeft: dropsLeft(g, me.id, now), dropsPerDay: DAILY_DROPS },
     players: Object.values(g.players).sort((a, b) => a.createdAt - b.createdAt).map(publicPlayer),
     sets: Object.values(g.sets)
       .sort((a, b) => (a.spicy - b.spicy) || (b.builtin - a.builtin) || ((a.order ?? 0) - (b.order ?? 0)) || a.createdAt - b.createdAt)
@@ -473,6 +491,7 @@ async function api(req, res, url) {
 
     case 'POST /drop': {
       if (body.setId && !g.sets[body.setId]) throw new HttpError(404, 'Set introuvable');
+      if (!dropsLeft(g, me.id, now)) throw new HttpError(429, `Tu as déjà lancé ${DAILY_DROPS} questions aujourd’hui. Ça repart à minuit !`);
       let q;
       if (body.text) {
         if (!body.setId) throw new HttpError(400, 'Choisis un set pour ta question');
@@ -481,7 +500,8 @@ async function api(req, res, url) {
         q = game.pickQuestion(g, body.setId || null);
         if (!q) throw new HttpError(400, 'Plus aucune question dispo ici 😢 Ajoutes-en !');
       }
-      return ok({ poll: pv(g, game.createPoll(g, q, now, 'manual', me.id), me, now) });
+      logDrop(g, me.id, now);
+      return ok({ poll: pv(g, game.createPoll(g, q, now, 'manual', me.id), me, now), dropsLeft: dropsLeft(g, me.id, now) });
     }
 
     // --- Sets & questions ---
@@ -571,6 +591,18 @@ async function api(req, res, url) {
 
     case 'POST /push/unsubscribe':
       push.unsubscribe(g, me.id, body.endpoint);
+      return ok();
+
+    // Envoie tout de suite une notif de test à soi-même et renvoie le résultat par appareil.
+    case 'POST /push/test': {
+      const devices = (g.pushSubs[me.id] || []).length;
+      if (!devices) return ok({ devices: 0, results: [] });
+      const results = await push.sendTo(g, me.id, { title: 'Test réussi', body: 'Les notifications marchent sur cet appareil.', tag: 'test', url: '/' });
+      return ok({ devices, results });
+    }
+
+    case 'POST /presence':
+      live.presence(g.id, me.id, body.visible !== false);
       return ok();
 
     // --- Admin ---

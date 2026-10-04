@@ -1,4 +1,4 @@
-// Service worker : notifications push + installation sur l'écran d'accueil.
+// Service worker : notifications push + installation sur l'écran d'accueil. (v4)
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
 
@@ -6,19 +6,25 @@ self.addEventListener('push', (event) => {
   let data = {};
   try {
     data = event.data ? event.data.json() : {};
-  } catch {
-    data = { body: event.data && event.data.text() };
+  } catch (e) {
+    data = { body: event.data ? event.data.text() : '' };
   }
+  const title = data.title || 'Qui de nous ?';
+  const options = {
+    body: data.body || '',
+    icon: '/icon-192.png',
+    badge: '/badge-96.png',
+    timestamp: Date.now(),
+    data: { url: data.url || '/' },
+  };
+  if (data.tag) {
+    options.tag = data.tag;
+    options.renotify = true; // une notif qui remplace la précédente (même discussion) sonne quand même
+  }
+  // iPhone et Android exigent qu'une notification s'affiche pour chaque push reçu :
+  // si les options avancées posent problème, on retombe sur une notification minimale.
   event.waitUntil(
-    self.registration.showNotification(data.title || 'Qui de nous ? 🤔', {
-      body: data.body || 'Nouvelle question !',
-      tag: data.tag,
-      renotify: !!data.tag, // une notif qui remplace la précédente (même discussion) sonne quand même
-      timestamp: Date.now(),
-      icon: '/icon-192.png',
-      badge: '/icon-192.png',
-      data: { url: data.url || '/' },
-    })
+    self.registration.showNotification(title, options).catch(() => self.registration.showNotification(title, { body: options.body }))
   );
 });
 

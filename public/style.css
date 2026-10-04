@@ -1301,3 +1301,72 @@ main { padding-top: 14px; }
   transition: transform 0.2s;
 }
 .theme-btn.on .theme-knob { transform: translateX(22px); background: #2a1d43; }
+
+/* =====================================================================
+   v4 : icônes au trait, résultats nominatifs, questions perso
+   ===================================================================== */
+
+[hidden] { display: none !important; }
+
+.ico-svg { width: 1.15em; height: 1.15em; display: block; flex-shrink: 0; }
+.nav button .ico .ico-svg { width: 22px; height: 22px; margin-bottom: 2px; }
+.nav button .ico { display: grid; place-items: center; }
+.fab { display: grid; place-items: center; }
+.fab .ico-svg { width: 26px; height: 26px; stroke-width: 2.5; }
+.more-btn { display: grid; place-items: center; }
+.more-btn .ico-svg { width: 20px; height: 20px; }
+.pc-ico { color: var(--muted); display: grid; place-items: center; }
+.pc-ico .ico-svg { width: 18px; height: 18px; }
+.chat-back { display: grid; place-items: center; }
+.chat-back .ico-svg { width: 24px; height: 24px; }
+.send-btn { display: grid; place-items: center; }
+.send-btn .ico-svg { width: 18px; height: 18px; }
+.icon-btn { color: var(--muted); display: grid; place-items: center; }
+.icon-btn .ico-svg, .qrow .ico-svg { width: 18px; height: 18px; }
+.theme-knob .ico-svg { width: 15px; height: 15px; color: #f59e0b; }
+.theme-btn.on .theme-knob .ico-svg { color: #c4a5ff; }
+
+/* Résultats : qui a voté pour qui */
+.result { display: block; padding: 8px 12px 8px 8px; }
+.result-main { position: relative; display: flex; align-items: center; gap: 10px; }
+.result-main .name { flex: 1; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.result.winner .name { font-weight: 700; }
+.result-voters { position: relative; margin: 4px 0 0 40px; font-size: 0.8rem; color: var(--muted); line-height: 1.3; }
+
+/* Question écrite par quelqu'un du groupe : bandeau orange en haut de la carte */
+.poll.custom { border: 1.5px solid #ff9f43; }
+.custom-tag {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: -16px -16px 12px;
+  padding: 8px 16px;
+  border-radius: 19px 19px 0 0;
+  background: #fff1e3;
+  color: #b4530a;
+  font-size: 0.85rem;
+  border-bottom: 1px solid #ffd9b3;
+}
+.custom-tag .ico-svg { width: 15px; height: 15px; }
+[data-theme="dark"] .custom-tag { background: #3a2312; color: #ffb36b; border-bottom-color: #5a3519; }
+[data-theme="dark"] .poll.custom { border-color: #d97a2b; }
+
+/* Moi */
+.card-title { font-weight: 700; font-size: 1rem; margin-bottom: 10px; }
+.profile-row { display: flex; align-items: center; gap: 12px; }
+.avatar.lg { width: 56px; height: 56px; font-size: 1.8rem; }
+.profile-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.profile-text b { font-size: 1.15rem; }
+.emoji-pick { margin-top: 14px; }
+.emoji-pick summary { cursor: pointer; font-weight: 600; color: var(--accent-text); list-style: none; padding: 4px 0; }
+.emoji-pick summary::-webkit-details-marker { display: none; }
+.emoji-pick[open] summary { margin-bottom: 10px; }
+.push-out { white-space: pre-wrap; margin: 10px 0 0; }
+.push-out:empty { display: none; }
+.group-code-row span:first-child { font-weight: 600; }
+
+/* Feuille "Lancer une question" */
+.drops-left { background: var(--soft); border-radius: 12px; padding: 10px 12px; margin: 0 0 12px; font-size: 0.9rem; }
+.drops-left.empty { color: var(--danger); }
+
+.install-banner { padding-left: 16px; }

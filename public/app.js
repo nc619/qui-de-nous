@@ -45,6 +45,29 @@
     return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
 
+  // Icônes au trait (prennent la couleur du texte) : plus sobres que des emojis.
+  const ICONS = {
+    live: '<path d="M13 2 4 14h7l-1 8 9-12h-7l1-8z"/>',
+    chat: '<path d="M21 12a8 8 0 0 1-11.6 7.1L3 21l1.9-6.4A8 8 0 1 1 21 12z"/>',
+    sets: '<path d="m12 3 9 5-9 5-9-5 9-5z"/><path d="m3 13 9 5 9-5"/>',
+    stats: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
+    me: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
+    plus: '<path d="M12 5v14M5 12h14"/>',
+    more: '<circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/>',
+    comment: '<path d="M21 12a8 8 0 0 1-11.6 7.1L3 21l1.9-6.4A8 8 0 1 1 21 12z"/>',
+    send: '<path d="M4 12 20 4l-6 16-3-7-7-1z"/>',
+    back: '<path d="M15 5l-7 7 7 7"/>',
+    edit: '<path d="M4 20h4L19 9l-4-4L4 16v4z"/>',
+    key: '<circle cx="8" cy="15" r="4"/><path d="m11 12 9-9M17 6l3 3"/>',
+    trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>',
+    sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+    moon: '<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/>',
+    pen: '<path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>',
+  };
+  function icon(name, cls = '') {
+    return `<svg class="ico-svg ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ''}</svg>`;
+  }
+
   function toast(msg) {
     $toast.textContent = msg;
     $toast.classList.add('show');
@@ -193,21 +216,21 @@
           <input class="input" id="name" required maxlength="24" placeholder="Ton pseudo dans le groupe" value="${esc(load('lastName') || '')}">
           ${pinField()}`;
       } else if (!roster) {
-        fields = codeField('Demande-le à tes potes 🤫');
+        fields = codeField('Demande-le à tes potes');
       } else {
         fields = `
           <div class="info">Groupe <b>${esc(roster.group.name)}</b> · <button type="button" class="link" id="otherCode">changer de code</button></div>
           <label>Qui es-tu ?</label>
           ${roster.players.length ? `<div class="pick-grid">${roster.players.map((p) => `
             <button type="button" class="choice ${picked && picked.id === p.id ? 'picked' : ''}" data-pick="${p.id}">${avatar(p)}<span>${esc(p.name)}</span></button>`).join('')}</div>`
-            : '<div class="info">Tout le monde a déjà rejoint 🤔 Demande à l’admin de t’ajouter.</div>'}
+            : '<div class="info">Tout le monde a déjà rejoint. Demande à l’admin de t’ajouter.</div>'}
           ${picked ? `
-            <label for="name">Ton pseudo (tu peux le changer 😏)</label>
+            <label for="name">Ton pseudo (tu peux le changer)</label>
             <input class="input" id="name" required maxlength="24" value="${esc(picked.name)}">
             ${pinField()}
             <label>Ton emoji</label>${emojiGrid(EMOJIS, emoji)}` : ''}`;
       }
-      const label = mode === 'create' ? 'Créer le groupe 🚀' : mode === 'login' ? 'Entrer 🔓' : roster ? 'C’est parti 🚀' : 'Continuer →';
+      const label = mode === 'create' ? 'Créer le groupe' : mode === 'login' ? 'Entrer' : roster ? 'C’est parti' : 'Continuer →';
       const hideBtn = mode === 'join' && roster && !picked;
 
       $app.innerHTML = `
@@ -215,7 +238,7 @@
           <form class="auth-box" id="authForm" autocomplete="off">
             <span class="logo-emoji">🤔</span>
             <h1 class="logo">Qui de nous ?</h1>
-            <p class="tagline">Une question toutes les 3 h. Votes anonymes. Verdicts sans pitié.</p>
+            <p class="tagline">Une question toutes les 3 h. Tout le monde vote. Verdicts sans pitié.</p>
             <div class="seg seg-3">
               <button type="button" data-mode="join" class="${mode === 'join' ? 'on' : ''}">Rejoindre</button>
               <button type="button" data-mode="login" class="${mode === 'login' ? 'on' : ''}">Connexion</button>
@@ -288,13 +311,13 @@
   }
 
   function showInvite(justCreated) {
-    const text = `Rejoins « ${state.group.name} » sur Qui de nous ? 🤔\nCode : ${state.group.code}\n${inviteLink()}`;
+    const text = `Rejoins « ${state.group.name} » sur Qui de nous ?\nCode : ${state.group.code}\n${inviteLink()}`;
     openSheet(`
-      <div class="sheet-head"><h2>${justCreated ? 'Groupe créé 🎉' : 'Inviter des potes'}</h2><button class="x" data-close>✕</button></div>
+      <div class="sheet-head"><h2>${justCreated ? 'Groupe créé' : 'Inviter des potes'}</h2><button class="x" data-close>✕</button></div>
       <p class="muted" style="margin:0 0 6px">Envoie ce code (ou le lien) à tes potes pour qu’ils rejoignent <b>${esc(state.group.name)}</b>.</p>
       <div class="big-code">${esc(state.group.code)}</div>
       <div class="row">
-        <button class="btn btn-main" id="shareBtn">${navigator.share ? '📤 Partager' : '📋 Copier le lien'}</button>
+        <button class="btn btn-main" id="shareBtn">${navigator.share ? 'Partager' : 'Copier le lien'}</button>
         <button class="btn btn-soft" id="copyCode">Copier le code</button>
       </div>
       ${justCreated ? '<div class="info" style="margin-top:14px">👉 Ajoute d’abord les noms de tes potes dans <b>Admin → Les potes</b> : ils choisiront leur nom en rejoignant.</div>' : ''}`, (root) => {
@@ -306,11 +329,11 @@
           prompt('Copie ça :', t);
         }
       };
-      root.querySelector('#copyCode').onclick = () => copy(state.group.code, 'Code copié 📋');
+      root.querySelector('#copyCode').onclick = () => copy(state.group.code, 'Code copié');
       root.querySelector('#shareBtn').onclick = async () => {
         if (navigator.share) {
           try { await navigator.share({ title: 'Qui de nous ?', text }); } catch { /* annulé */ }
-        } else copy(text, 'Invitation copiée 📋');
+        } else copy(text, 'Invitation copiée');
       };
     });
   }
@@ -322,6 +345,7 @@
   }
 
   function logoutLocal() {
+    stopPresence();
     token = null;
     state = null;
     stopLive();
@@ -342,6 +366,8 @@
       renderMain();
       startPolling();
       startLive();
+      startPresence();
+      syncPush();
       if (pendingChat) {
         const ch = pendingChat;
         pendingChat = null;
@@ -389,8 +415,11 @@
   }
 
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden) stopLive();
-    else if (token && state) {
+    if (document.hidden) {
+      stopLive();
+      stopPresence();
+    } else if (token && state) {
+      startPresence();
       refresh();
       if (chatOpen) loadChat(chatOpen, true);
     }
@@ -417,7 +446,7 @@
       paintThemeBtn();
     }
     const m = me();
-    document.getElementById('groupTitle').textContent = `🤔 ${state.group.name}`;
+    document.getElementById('groupTitle').textContent = state.group.name;
     document.getElementById('meChip').innerHTML = `${avatar(m)}<span>${esc(m.name)}</span>`;
     renderNav();
     renderView();
@@ -427,18 +456,18 @@
     const n = todoCount();
     const unread = state.chat.unread;
     const items = [
-      ['live', '🗳️', 'Live', n],
-      ['chat', '💬', 'Chat', unread],
-      ['sets', '📚', 'Sets', 0],
-      ['stats', '📊', 'Stats', 0],
-      ['me', '🙂', 'Moi', 0],
+      ['live', 'live', 'Live', n],
+      ['chat', 'chat', 'Chat', unread],
+      ['sets', 'sets', 'Sets', 0],
+      ['stats', 'stats', 'Stats', 0],
+      ['me', 'me', 'Moi', 0],
     ];
     const nav = document.getElementById('nav');
     if (!nav) return;
     nav.innerHTML = items
       .map(([id, ico, label, badge]) => `
         <button data-tab="${id}" class="${tab === id ? 'on' : ''}">
-          <span class="ico">${ico}</span>${label}
+          <span class="ico">${icon(ico)}</span>${label}
           ${badge ? `<span class="badge">${badge}</span>` : ''}
         </button>`)
       .join('');
@@ -457,7 +486,7 @@
     b.classList.toggle('on', isDark());
     b.setAttribute('aria-checked', String(isDark()));
     b.setAttribute('aria-label', isDark() ? 'Passer en mode clair' : 'Passer en mode sombre');
-    b.innerHTML = '<span class="theme-knob">' + (isDark() ? '🌙' : '☀️') + '</span>';
+    b.innerHTML = '<span class="theme-knob">' + icon(isDark() ? 'moon' : 'sun') + '</span>';
   }
 
   function setTheme(theme) {
@@ -506,37 +535,45 @@
         .join('')}</div>
         ${editing === p.id ? '<button class="link-btn" data-cancel>Annuler</button>' : ''}`;
     } else {
+      // Résultats : pour chaque personne votée, le nombre de votes et QUI a voté pour elle.
       const counts = Object.entries(p.results || {}).sort((a, b) => b[1] - a[1]);
       const max = counts.length ? counts[0][1] : 0;
+      const votersFor = (id) => (p.ballots || []).filter((b) => b.target === id).map((b) => player(b.voter));
       body = counts.length
         ? `<div class="results">${counts
             .map(([id, c]) => {
               const u = player(id);
               const pct = total ? Math.round((c / total) * 100) : 0;
+              const voters = votersFor(id);
               return `
-                <div class="result ${p.myVote === id ? 'mine' : ''}">
+                <div class="result ${p.myVote === id ? 'mine' : ''} ${c === max ? 'winner' : ''}">
                   <span class="bar" style="width:${pct}%;background:${esc(u.color)}"></span>
-                  ${avatar(u, 'sm')}
-                  <span class="name">${esc(u.name)}${c === max ? ' 👑' : ''}</span>
-                  <span class="votes">${c}</span>
+                  <div class="result-main">
+                    ${avatar(u, 'sm')}
+                    <span class="name">${esc(u.name)}</span>
+                    <span class="votes">${c}</span>
+                  </div>
+                  ${voters.length ? `<div class="result-voters">par ${voters.map((v) => esc(v.id === state.me.playerId ? 'toi' : v.name)).join(', ')}</div>` : ''}
                 </div>`;
             })
             .join('')}</div>`
-        : '<p class="muted small" style="margin:0">Personne n’a voté 😶</p>';
+        : '<p class="muted small" style="margin:0">Personne n’a voté.</p>';
     }
 
-    const status = p.ended ? 'Terminé' : `⏳ ${left(p.endsAt)}`;
+    const status = p.ended ? 'Terminé' : `encore ${left(p.endsAt)}`;
+    const author = p.custom && p.authorId ? player(p.authorId) : null;
     return `
-      <article class="card poll ${voting && !p.myVote ? 'todo' : ''}">
+      <article class="card poll ${voting && !p.myVote ? 'todo' : ''} ${p.custom ? 'custom' : ''}">
+        ${p.custom ? `<div class="custom-tag">${icon('pen')}<span>Question de <b>${author ? esc(author.name) : 'quelqu’un du groupe'}</b></span></div>` : ''}
         <div class="poll-top">
-          <span class="poll-set ${s.spicy ? 'spicy' : ''}">${esc(s.emoji)} ${esc(s.name)}</span>
+          <span class="poll-set ${s.spicy ? 'spicy' : ''}">${esc(s.name)}${s.spicy ? ' · 18+' : ''}</span>
           <span class="poll-time">${status}</span>
         </div>
         <h2 class="question">${esc(p.text)}</h2>
         ${body}
         <div class="poll-foot">
-          <span>${total}/${state.players.length} ${total > 1 ? 'ont voté' : 'a voté'} · ${by ? esc(by.name) : 'drop auto'} · ${ago(p.startsAt)}</span>
-          ${hasMenu ? `<button class="more-btn" data-more="${p.id}" aria-label="Options">⋯</button>` : ''}
+          <span>${total}/${state.players.length} ${total > 1 ? 'ont voté' : 'a voté'}${author && by && author.id === by.id ? '' : ` · ${by ? 'lancée par ' + esc(by.name) : 'question du jour'}`} · ${ago(p.startsAt)}</span>
+          ${hasMenu ? `<button class="more-btn" data-more="${p.id}" aria-label="Options">${icon('more')}</button>` : ''}
         </div>
         ${pollChatPreview(p)}
       </article>`;
@@ -544,15 +581,15 @@
 
   function pollChatPreview(p) {
     const c = p.chat || { count: 0, unread: 0, last: [] };
-    if (!c.count) return `<button class="poll-chat" data-chat="${p.id}"><span class="pc-ico">💬</span><span class="pc-body muted">Commenter…</span></button>`;
+    if (!c.count) return `<button class="poll-chat" data-chat="${p.id}"><span class="pc-ico">${icon('comment')}</span><span class="pc-body muted">Commenter…</span></button>`;
     const lines = c.last.map((m) => {
       const u = player(m.playerId);
       const who = m.playerId === state.me.playerId ? 'Toi' : esc(u.name);
-      return `<span class="pc-msg"><b>${who}</b> ${m.deleted ? '<i>supprimé</i>' : m.kind === 'gif' ? '🎞️ GIF' : esc(m.text)}</span>`;
+      return `<span class="pc-msg"><b>${who}</b> ${m.deleted ? '<i>supprimé</i>' : m.kind === 'gif' ? 'GIF' : esc(m.text)}</span>`;
     }).join('');
     return `
       <button class="poll-chat" data-chat="${p.id}">
-        <span class="pc-ico">💬</span>
+        <span class="pc-ico">${icon('comment')}</span>
         <span class="pc-body">${lines}</span>
         <span class="pc-count ${c.unread ? 'new' : ''}">${c.unread || c.count}</span>
       </button>`;
@@ -566,8 +603,8 @@
       <div class="sheet-head"><h2>Options</h2><button class="x" data-close>✕</button></div>
       <p class="muted" style="margin:0 0 12px">${esc(p.text)}</p>
       <div class="menu-list">
-        ${!p.ended && p.myVote ? '<button class="menu-item" id="mEdit">✏️ Changer mon vote</button>' : ''}
-        ${canDelete ? '<button class="menu-item danger" id="mDel">🗑️ Supprimer le sondage</button>' : ''}
+        ${!p.ended && p.myVote ? '<button class="menu-item" id="mEdit">Changer mon vote</button>' : ''}
+        ${canDelete ? '<button class="menu-item danger" id="mDel">Supprimer le sondage</button>' : ''}
       </div>`, (root) => {
       const ed = root.querySelector('#mEdit');
       if (ed) ed.onclick = () => { closeSheet(); editing = id; renderView(); };
@@ -592,7 +629,7 @@
           const { poll } = await api('POST', `polls/${b.dataset.vote}/vote`, { playerId: b.dataset.target });
           replacePoll(poll);
           editing = null;
-          toast('Vote enregistré 🤫');
+          toast('Vote enregistré');
           renderMain();
         } catch (e) {
           toast(e.message);
@@ -641,16 +678,15 @@
     view.innerHTML = `
       ${installBanner()}
       ${liveSwitch()}
-      <p class="next-line">⏰ ${next} · ${plural(state.remainingQuestions, 'question')} en réserve</p>
+      <p class="next-line">${next} · ${plural(state.remainingQuestions, 'question')} en réserve</p>
       ${!state.live.length ? `
         <div class="card empty">
-          <span class="big">🦗</span>
-          Rien à voter pour l’instant…<br>Lance une question avec le ＋ si tu t’ennuies !
+          Rien à voter pour l’instant…<br>Lance une question avec le bouton + si tu t’ennuies.
         </div>` : ''}
       ${todo.length ? `<div class="section-title">À toi de voter <span class="count">${todo.length}</span></div>${todo.map(pollCard).join('')}` : ''}
-      ${!todo.length && done.length ? '<p class="all-done">😌 Tu as voté partout.</p>' : ''}
+      ${!todo.length && done.length ? '<p class="all-done">Tu as voté partout.</p>' : ''}
       ${done.length ? `<div class="section-title">Déjà voté <span class="count">${done.length}</span></div>${done.map(pollCard).join('')}` : ''}
-      <button class="fab" id="fab" aria-label="Lancer une question">＋</button>`;
+      <button class="fab" id="fab" aria-label="Lancer une question">${icon('plus')}</button>`;
 
     bindPollCards(view);
     bindLiveSwitch(view);
@@ -671,7 +707,7 @@
   });
   window.addEventListener('appinstalled', () => {
     installPrompt = null;
-    toast('App installée 🎉');
+    toast('App installée');
     if (state && tab === 'live') renderView();
   });
 
@@ -680,7 +716,7 @@
     if (!installPrompt && !isIOS) return '';
     return `
       <div class="install-banner">
-        <span class="ib-icon">📲</span>
+        
         <div class="ib-text"><b>Installe l’app</b><span>Une icône sur ton écran d’accueil${isIOS ? ' et les notifs' : ''}.</span></div>
         <button class="btn btn-main btn-small" id="installBtn">Installer</button>
         <button class="x" id="installHide" aria-label="Masquer">✕</button>
@@ -703,7 +739,7 @@
         return;
       }
       openSheet(`
-        <div class="sheet-head"><h2>Installer sur iPhone 📲</h2><button class="x" data-close>✕</button></div>
+        <div class="sheet-head"><h2>Installer sur iPhone</h2><button class="x" data-close>✕</button></div>
         <ol class="steps">
           <li>Ouvre ce site dans <b>Safari</b>.</li>
           <li>Touche le bouton <b>Partager</b> <span class="share-ico">⎋</span> (le carré avec une flèche, en bas de l’écran).</li>
@@ -736,23 +772,28 @@
     const sets = state.sets;
     const draw = () => {
       const s = setId ? setOf(setId) : null;
+      const leftToday = state.me.dropsLeft;
+      const none = leftToday <= 0;
       openSheet(`
-        <div class="sheet-head"><h2>Lancer une question ✨</h2><button class="x" data-close>✕</button></div>
-        <p class="muted" style="margin:0 0 10px">Elle part tout de suite pour 24 h, avec une notif pour tout le monde.</p>
-        <label>Dans quel set ?</label>
+        <div class="sheet-head"><h2>Lancer une question</h2><button class="x" data-close>✕</button></div>
+        <p class="drops-left ${none ? 'empty' : ''}">${none
+          ? `Tu as utilisé tes ${state.me.dropsPerDay} questions du jour. Ça repart à minuit.`
+          : `Il te reste <b>${leftToday}</b> question${leftToday > 1 ? 's' : ''} sur ${state.me.dropsPerDay} aujourd’hui. Elle part tout de suite pour 24 h.`}</p>
+        <label>Set</label>
         <div class="set-chips">
-          <button class="chip ${!setId ? 'on' : ''}" data-set="">🎲 N’importe lequel</button>
-          ${sets.map((x) => `<button class="chip ${setId === x.id ? 'on' : ''} ${x.spicy ? 'spicy' : ''}" data-set="${x.id}">${esc(x.emoji)} ${esc(x.name)}</button>`).join('')}
+          <button class="chip ${!setId ? 'on' : ''}" data-set="">N’importe lequel</button>
+          ${sets.map((x) => `<button class="chip ${setId === x.id ? 'on' : ''} ${x.spicy ? 'spicy' : ''}" data-set="${x.id}">${esc(x.name)}</button>`).join('')}
         </div>
-        <button class="btn btn-main btn-block" id="dropRandom" ${s && !s.remaining ? 'disabled' : ''}>🎲 Question surprise${s ? ` (${s.remaining} dispo)` : ''}</button>
+        <button class="btn btn-main btn-block" id="dropRandom" ${none || (s && !s.remaining) ? 'disabled' : ''}>Question surprise${s ? ` (${s.remaining} dispo)` : ''}</button>
         <div class="or">ou écris la tienne</div>
-        <textarea class="input" id="ownQ" maxlength="200" placeholder="${s ? 'Qui est le plus susceptible de…' : 'Choisis d’abord un set ☝️'}" ${s ? '' : 'disabled'}></textarea>
-        <button class="btn btn-soft btn-block" id="dropOwn" ${s ? '' : 'disabled'}>Lancer ma question 🚀</button>`, (root) => {
+        <textarea class="input" id="ownQ" maxlength="200" placeholder="${s ? 'Qui serait le plus susceptible de…' : 'Choisis d’abord un set'}" ${s && !none ? '' : 'disabled'}></textarea>
+        <p class="muted small" style="margin:6px 0 0">Elle apparaîtra avec ton nom, comme question perso.</p>
+        <button class="btn btn-soft btn-block" id="dropOwn" ${s && !none ? '' : 'disabled'}>Lancer ma question</button>`, (root) => {
         root.querySelectorAll('[data-set]').forEach((b) => (b.onclick = () => { setId = b.dataset.set; draw(); }));
         action(root.querySelector('#dropRandom'), () => drop({ setId: setId || undefined }));
         action(root.querySelector('#dropOwn'), () => {
           const text = root.querySelector('#ownQ').value.trim();
-          if (text.length < 8) throw new Error('Écris une vraie question 😅');
+          if (text.length < 8) throw new Error('Écris une vraie question');
           return drop({ setId, text });
         });
       });
@@ -761,11 +802,11 @@
   }
 
   async function drop(body) {
-    const { poll } = await api('POST', 'drop', body);
+    const { poll, dropsLeft } = await api('POST', 'drop', body);
     replacePoll(poll);
+    state.me.dropsLeft = dropsLeft;
     closeSheet();
-    confetti();
-    toast('Question lancée ! À toi de voter 👀');
+    toast(`Question lancée · encore ${dropsLeft} aujourd’hui`);
     tab = 'live';
     save('tab', tab);
     await refresh();
@@ -820,9 +861,9 @@
 
     view.innerHTML = `
       <button class="btn btn-main btn-block" id="newSet" style="margin-top:0">＋ Créer un set</button>
-      <div class="section-title">📚 Les sets <span class="count">${classic.length}</span></div>
+      <div class="section-title">Les sets <span class="count">${classic.length}</span></div>
       ${grid(classic)}
-      ${spicy.length ? `<div class="section-title">🌶️ Spicy · 18+ <span class="count">${spicy.length}</span></div>${grid(spicy)}` : ''}`;
+      ${spicy.length ? `<div class="section-title">Spicy · 18+ <span class="count">${spicy.length}</span></div>${grid(spicy)}` : ''}`;
 
     view.querySelectorAll('[data-open]').forEach((b) => (b.onclick = () => { openSet = b.dataset.open; setDetail = null; renderView(); window.scrollTo({ top: 0 }); }));
     document.getElementById('newSet').onclick = () => openSetForm();
@@ -831,13 +872,13 @@
   function openSetForm(existing) {
     let emoji = existing ? existing.emoji : '✨';
     openSheet(`
-      <div class="sheet-head"><h2>${existing ? 'Modifier le set' : 'Nouveau set ✨'}</h2><button class="x" data-close>✕</button></div>
+      <div class="sheet-head"><h2>${existing ? 'Modifier le set' : 'Nouveau set'}</h2><button class="x" data-close>✕</button></div>
       <label for="setName">Nom</label>
       <input class="input" id="setName" maxlength="40" placeholder="Ex : Les vacances à Lisbonne" value="${esc(existing ? existing.name : '')}">
       <label for="setDesc">Description</label>
       <input class="input" id="setDesc" maxlength="120" placeholder="De quoi ça parle ?" value="${esc(existing ? existing.description : '')}">
       <label>Emoji</label>${emojiGrid(SET_EMOJIS, emoji)}
-      <label class="toggle"><input type="checkbox" id="setSpicy" ${existing && existing.spicy ? 'checked' : ''}> <span>🌶️ Set spicy (18+)</span></label>
+      <label class="toggle"><input type="checkbox" id="setSpicy" ${existing && existing.spicy ? 'checked' : ''}> <span>Set spicy (18+)</span></label>
       <button class="btn btn-main btn-block" id="saveSet">${existing ? 'Enregistrer' : 'Créer le set'}</button>`, (root) => {
       bindEmojiGrid(root, (e) => (emoji = e));
       action(root.querySelector('#saveSet'), async () => {
@@ -849,7 +890,7 @@
         };
         const { set } = existing ? await api('PATCH', `sets/${existing.id}`, body) : await api('POST', 'sets', body);
         closeSheet();
-        toast(existing ? 'Set modifié ✅' : 'Set créé ! Ajoute des questions 👇');
+        toast(existing ? 'Set modifié' : 'Set créé. Ajoute des questions.');
         openSet = set.id;
         setDetail = null;
         await refresh();
@@ -880,10 +921,10 @@
         <span class="set-emoji big">${esc(s.emoji)}</span>
         <h2 class="question" style="margin:4px 0">${esc(s.name)}${s.spicy ? ' <span class="set-badge spicy">18+</span>' : ''}</h2>
         ${s.description ? `<p class="muted" style="margin:0">${esc(s.description)}</p>` : ''}
-        <p class="set-count" style="margin:10px 0 0">${s.played} jouée${s.played > 1 ? 's' : ''} · 🔒 ${s.remaining} encore secrète${s.remaining > 1 ? 's' : ''}</p>
+        <p class="set-count" style="margin:10px 0 0">${s.played} jouée${s.played > 1 ? 's' : ''} · ${s.remaining} encore secrète${s.remaining > 1 ? 's' : ''}</p>
         <div class="row">
-          <button class="btn btn-main" id="dropHere" ${s.remaining ? '' : 'disabled'}>🎲 Lancer</button>
-          ${canEdit ? '<button class="btn btn-soft" id="editSet">✏️ Modifier</button>' : ''}
+          <button class="btn btn-main" id="dropHere" ${s.remaining ? '' : 'disabled'}>Lancer une question</button>
+          ${canEdit ? '<button class="btn btn-soft" id="editSet">Modifier</button>' : ''}
         </div>
       </div>
 
@@ -895,12 +936,12 @@
       </div>
 
       ${d.mine.length ? `
-        <div class="section-title">🤫 Tes questions en attente <span class="count">${d.mine.length}</span></div>
+        <div class="section-title">Tes questions en attente <span class="count">${d.mine.length}</span></div>
         <div class="card qlist">${d.mine.map((q) => `
-          <div class="qrow"><span>${esc(q.text)}</span><button class="btn btn-small btn-danger" data-delq="${q.id}" aria-label="Supprimer">🗑️</button></div>`).join('')}
+          <div class="qrow"><span>${esc(q.text)}</span><button class="btn btn-small btn-danger" data-delq="${q.id}" aria-label="Supprimer">${icon('trash')}</button></div>`).join('')}
         </div>` : ''}
 
-      <div class="section-title">✅ Déjà jouées <span class="count">${d.played.length}</span></div>
+      <div class="section-title">Déjà jouées <span class="count">${d.played.length}</span></div>
       ${d.played.length ? `<div class="card qlist">${d.played.map((q) => `<div class="qrow"><span>${esc(q.text)}</span><span class="muted small">${ago(q.usedAt)}</span></div>`).join('')}</div>`
         : '<div class="card empty" style="padding:18px">Aucune question jouée pour l’instant.</div>'}
       ${canEdit && !s.played ? '<button class="btn btn-danger btn-block" id="delSet">Supprimer ce set</button>' : ''}`;
@@ -911,7 +952,7 @@
     action(document.getElementById('addQ'), async () => {
       const text = document.getElementById('newQ').value;
       const r = await api('POST', `sets/${s.id}/questions`, { text });
-      toast(r.added.length ? `${plural(r.added.length, 'question')} ajoutée${r.added.length > 1 ? 's' : ''} 🤫` : 'Rien ajouté');
+      toast(r.added.length ? `${plural(r.added.length, 'question')} ajoutée${r.added.length > 1 ? 's' : ''}` : 'Rien ajouté');
       if (r.errors.length) alert('Pas ajoutées :\n\n' + r.errors.join('\n'));
       setDetail = null;
       await refresh();
@@ -970,20 +1011,20 @@
       </div>
       <div class="card radar-card">
         <div class="radar-title">${avatar(p)}<div><b>${esc(p.name)}</b>${ps.polls ? `<div class="muted small">A reçu des votes dans ${plural(ps.polls, 'sondage')} terminé${ps.polls > 1 ? 's' : ''}</div>` : ''}</div></div>
-        ${anyData ? window.radarSvg(defs, ps.value, p.color, active.length > 1 ? avg : null) : '<div class="empty">📊<br>Les stats arrivent quand les premiers sondages se terminent.</div>'}
+        ${anyData ? window.radarSvg(defs, ps.value, p.color, active.length > 1 ? avg : null) : '<div class="empty">Les stats arrivent quand les premiers sondages se terminent.</div>'}
         ${anyData && active.length > 1 ? '<div class="legend"><span class="dash"></span> moyenne du groupe</div>' : ''}
         ${myTitles.length ? `<div class="title-chips">${myTitles.map((t) => `<span class="title-chip ${t.low ? 'low' : ''}">${t.emoji} ${esc(t.title)}</span>`).join('')}</div>` : ''}
-        ${anyData && st.ended < st.titlesAt ? `<p class="muted small" style="margin:10px 0 0">🔒 Les titres se débloquent après ${st.titlesAt} sondages terminés (encore ${st.titlesAt - st.ended}).</p>` : ''}
+        ${anyData && st.ended < st.titlesAt ? `<p class="muted small" style="margin:10px 0 0">Les titres se débloquent après ${st.titlesAt} sondages terminés (encore ${st.titlesAt - st.ended}).</p>` : ''}
       </div>
       ${ps.wins.length ? `
-        <div class="section-title">🏅 Élu pour… <span class="count">${ps.wins.length}</span></div>
+        <div class="section-title">Élu pour… <span class="count">${ps.wins.length}</span></div>
         <div class="card qlist">${ps.wins.slice(0, 15).map((w) => `<div class="qrow"><span>${esc(w.text)}</span><span class="muted small">${esc(setOf(w.setId).emoji)}</span></div>`).join('')}</div>` : ''}
       ${st.titles.length ? `
-        <div class="section-title">🏆 Les titres du groupe</div>
+        <div class="section-title">Les titres du groupe</div>
         <div class="card titles-board">${st.titles.map((t) => `
           <div class="title-row">${avatar(player(t.playerId), 'sm')}<span class="name">${esc(player(t.playerId).name)}</span><span class="title-chip ${t.low ? 'low' : ''}">${t.emoji} ${esc(t.title)}</span></div>`).join('')}
         </div>` : ''}
-      ${anyData ? `<div class="section-title">📊 Classements</div>${defs.map(ranking).join('')}` : ''}`;
+      ${anyData ? `<div class="section-title">Classements</div>${defs.map(ranking).join('')}` : ''}`;
 
     view.querySelectorAll('[data-player]').forEach((b) => (b.onclick = () => { statsPlayer = b.dataset.player; renderView(); }));
   }
@@ -997,38 +1038,42 @@
     const pushOk = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window && state.vapidKey;
 
     view.innerHTML = `
-      <div class="card" style="text-align:center">
-        <span class="avatar xl" style="background:${esc(m.color)}33">${esc(m.emoji)}</span>
-        <h2 class="question" style="margin:8px 0 0">${esc(m.name)}${state.me.isAdmin ? ' 👑' : ''}</h2>
-        ${state.me.isAdmin ? '<p class="muted" style="margin:4px 0 0">Admin du groupe</p>' : ''}
-      </div>
-
       <div class="card" id="profileCard">
-        <label for="myName" style="margin-top:0">Mon pseudo</label>
+        <div class="profile-row">
+          <span class="avatar lg" style="background:${esc(m.color)}33">${esc(m.emoji)}</span>
+          <div class="profile-text"><b>${esc(m.name)}</b><span class="muted small">${state.me.isAdmin ? 'Admin du groupe' : 'Membre du groupe'}</span></div>
+        </div>
+        <label for="myName">Pseudo</label>
         <div class="inline-form">
           <input class="input" id="myName" maxlength="24" value="${esc(m.name)}">
           <button class="btn btn-soft" id="saveName">OK</button>
         </div>
-        <label>Mon emoji</label>
-        ${emojiGrid(EMOJIS, m.emoji)}
-      </div>
-
-      <div class="card group-card">
-        <label style="margin-top:0">👥 ${esc(state.group.name)}</label>
-        <div class="group-code-row">
-          <span class="muted small">Code du groupe</span>
-          <span class="code-pill">${esc(state.group.code)}</span>
-        </div>
-        <button class="btn btn-main btn-block" id="inviteBtn" style="margin-top:12px">📤 Inviter des potes</button>
+        <details class="emoji-pick">
+          <summary>Changer d’emoji</summary>
+          ${emojiGrid(EMOJIS, m.emoji)}
+        </details>
       </div>
 
       <div class="card">
-        <label style="margin-top:0">🔔 Notifications</label>
-        <p class="muted small" id="pushStatus">…</p>
-        ${iOS && !standalone ? '<div class="info">Sur iPhone : touche <b>Partager</b> → <b>Sur l’écran d’accueil</b>, puis ouvre l’app depuis l’icône pour activer les notifs.</div>' : ''}
-        <button class="btn btn-main btn-block" id="pushBtn" ${pushOk ? '' : 'disabled'}>Activer les notifs</button>
+        <div class="card-title">Groupe</div>
+        <div class="group-code-row">
+          <span>${esc(state.group.name)}</span>
+          <span class="code-pill">${esc(state.group.code)}</span>
+        </div>
+        <button class="btn btn-main btn-block" id="inviteBtn" style="margin-top:14px">Inviter des potes</button>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Notifications</div>
+        <p class="muted small" id="pushStatus" style="margin:0 0 12px">…</p>
+        ${iOS && !standalone ? '<div class="info" style="margin-bottom:12px">Sur iPhone : touche <b>Partager</b> puis <b>Sur l’écran d’accueil</b>, et ouvre l’app depuis la nouvelle icône pour pouvoir activer les notifications.</div>' : ''}
+        <div class="row" style="margin-top:0">
+          <button class="btn btn-main" id="pushBtn" ${pushOk ? '' : 'disabled'}>Activer les notifications</button>
+          <button class="btn btn-soft" id="pushTest" hidden>Tester</button>
+        </div>
+        <p class="push-out muted small" id="pushOut"></p>
         <div class="notif-prefs">
-          ${[['polls', '🗳️ Nouvelles questions'], ['votes', '✅ Quand quelqu’un vote'], ['chat', '💬 Messages']].map(([k, label]) => `
+          ${[['polls', 'Nouvelles questions'], ['votes', 'Quand quelqu’un vote'], ['chat', 'Messages']].map(([k, label]) => `
             <label class="switch-row"><span>${label}</span><input type="checkbox" class="switch" data-notif="${k}" ${state.me.notif[k] ? 'checked' : ''}></label>`).join('')}
         </div>
       </div>
@@ -1040,13 +1085,13 @@
     action(document.getElementById('saveName'), async () => {
       await api('PATCH', 'me', { name: document.getElementById('myName').value });
       document.activeElement.blur();
-      toast('Pseudo changé ✅');
+      toast('Pseudo changé');
       await refresh();
     });
     bindEmojiGrid(document.getElementById('profileCard'), async (emoji) => {
       try {
         await api('PATCH', 'me', { emoji });
-        toast('Nouveau look ' + emoji);
+        toast('Emoji changé');
         await refresh();
       } catch (e) { toast(e.message); }
     });
@@ -1074,29 +1119,29 @@
   function adminHtml() {
     const s = state.settings;
     return `
-      <div class="section-title">👑 Admin</div>
+      <div class="section-title">Admin</div>
 
       <div class="card">
-        <label for="groupName" style="margin-top:0">Nom du groupe</label>
+        <div class="card-title">Nom du groupe</div>
         <div class="inline-form">
           <input class="input" id="groupName" maxlength="40" value="${esc(state.group.name)}">
           <button class="btn btn-soft" id="saveGroup">OK</button>
         </div>
         <p class="muted small" style="margin:10px 0 0">Le code a fuité ? Génère-en un nouveau : l’ancien ne marchera plus (ceux qui ont déjà rejoint restent connectés).</p>
-        <button class="btn btn-soft btn-block" id="newCode" style="margin-top:10px">🔄 Nouveau code</button>
+        <button class="btn btn-soft btn-block" id="newCode" style="margin-top:10px">Générer un nouveau code</button>
       </div>
 
       <div class="card">
-        <label style="margin-top:0">👥 Les potes <span class="muted small">(${state.players.length})</span></label>
+        <div class="card-title">Les potes <span class="muted small">· ${state.players.length}</span></div>
         <p class="muted small">Ajoute tout le monde ici, même ceux qui n’ont pas encore rejoint : on peut déjà voter pour eux.</p>
         <div class="roster">${state.players.map((p) => `
           <div class="roster-row">
             ${avatar(p, 'sm')}
             <span class="name">${esc(p.name)}</span>
             <span class="status ${p.claimed ? 'on' : ''}">${p.claimed ? 'a rejoint' : 'en attente'}</span>
-            <button class="icon-btn" data-rename="${p.id}" title="Renommer">✏️</button>
-            ${p.claimed && p.id !== state.me.playerId ? `<button class="icon-btn" data-reset="${p.id}" title="Réinitialiser le compte (PIN oublié)">🔑</button>` : ''}
-            ${!p.claimed ? `<button class="icon-btn" data-remove="${p.id}" title="Retirer">🗑️</button>` : ''}
+            <button class="icon-btn" data-rename="${p.id}" title="Renommer" aria-label="Renommer">${icon('edit')}</button>
+            ${p.claimed && p.id !== state.me.playerId ? `<button class="icon-btn" data-reset="${p.id}" title="Réinitialiser le compte (PIN oublié)" aria-label="Réinitialiser">${icon('key')}</button>` : ''}
+            ${!p.claimed ? `<button class="icon-btn" data-remove="${p.id}" title="Retirer" aria-label="Retirer">${icon('trash')}</button>` : ''}
           </div>`).join('')}
         </div>
         <textarea class="input" id="rosterAdd" placeholder="Un nom par ligne&#10;Alex&#10;John&#10;Carlos" style="margin-top:12px;min-height:80px"></textarea>
@@ -1104,7 +1149,7 @@
       </div>
 
       <div class="card">
-        <label style="margin-top:0">⏰ Planning des questions</label>
+        <div class="card-title">Planning des questions</div>
         <div class="settings-grid">
           <label>Toutes les (heures)<input class="input" id="sInterval" type="number" step="0.25" min="0.02" max="24" value="${s.intervalHours}"></label>
           <label>Durée du vote (heures)<input class="input" id="sPoll" type="number" step="1" min="0.02" max="168" value="${s.pollHours}"></label>
@@ -1115,14 +1160,14 @@
         <p class="muted small">Prochaine question auto : <b>${state.nextDrop ? clock(state.nextDrop) : '—'}</b> · ${plural(state.remainingQuestions, 'question')} en réserve</p>
         <div class="row">
           <button class="btn btn-main" id="saveSettings">Enregistrer</button>
-          <button class="btn btn-soft" id="forceDrop">🎲 Drop maintenant</button>
+          <button class="btn btn-soft" id="forceDrop">Lancer maintenant</button>
         </div>
       </div>
 
       <div class="card">
-        <label style="margin-top:0">🧪 Questions à noter</label>
+        <div class="card-title">Questions à noter</div>
         <p class="muted small">Les questions créées par le groupe n’ont pas encore de stats. Copie-les, donne-les à Claude, puis colle sa réponse ici.</p>
-        <button class="btn btn-soft btn-block" id="exportQ">📋 Copier les questions à noter</button>
+        <button class="btn btn-soft btn-block" id="exportQ">Copier les questions à noter</button>
         <textarea class="input" id="scoresIn" placeholder='Réponse de Claude : {"id": {"chaos": 2, "hot": 1}, …}' style="margin-top:12px;min-height:80px"></textarea>
         <button class="btn btn-main btn-block" id="importQ" style="margin-top:10px">Importer les scores</button>
       </div>`;
@@ -1132,7 +1177,7 @@
     action(document.getElementById('saveGroup'), async () => {
       await api('PATCH', 'admin/group', { name: document.getElementById('groupName').value });
       document.activeElement.blur();
-      toast('Groupe renommé ✅');
+      toast('Groupe renommé');
       await refresh();
     });
     action(document.getElementById('newCode'), async () => {
@@ -1144,7 +1189,7 @@
     });
     action(document.getElementById('rosterBtn'), async () => {
       const r = await api('POST', 'admin/players', { names: document.getElementById('rosterAdd').value });
-      toast(r.added.length ? `${plural(r.added.length, 'pote')} ajouté${r.added.length > 1 ? 's' : ''} 🎉` : 'Personne d’ajouté');
+      toast(r.added.length ? `${plural(r.added.length, 'pote')} ajouté${r.added.length > 1 ? 's' : ''}` : 'Personne d’ajouté');
       if (r.errors.length) alert(r.errors.join('\n'));
       await refresh();
     });
@@ -1178,18 +1223,17 @@
     action(document.getElementById('forceDrop'), async () => {
       const { poll } = await api('POST', 'admin/drop-auto');
       replacePoll(poll);
-      confetti();
-      toast('Question lancée 🎲');
+      toast('Question lancée');
       go('live');
       await refresh();
     });
     action(document.getElementById('exportQ'), async () => {
       const { questions } = await api('GET', 'admin/unscored');
-      if (!questions.length) return toast('Rien à noter, tout est à jour ✅');
+      if (!questions.length) return toast('Rien à noter, tout est à jour');
       const text = 'Questions « Qui de nous ? » à noter (stats : chaos, hot, coeur, cerveau, genance, toxique, exces ; 1 à 3 stats par question, valeurs -2 à 3). Réponds en JSON {"id": {"stat": valeur}}.\n\n' + JSON.stringify(questions, null, 1);
       try {
         await navigator.clipboard.writeText(text);
-        toast(`${plural(questions.length, 'question')} copiée${questions.length > 1 ? 's' : ''} 📋`);
+        toast(`${plural(questions.length, 'question')} copiée${questions.length > 1 ? 's' : ''}`);
       } catch {
         document.getElementById('scoresIn').value = text;
         toast('Copie impossible : le texte est dans la case, copie-le à la main');
@@ -1199,9 +1243,9 @@
       const raw = document.getElementById('scoresIn').value.trim();
       const json = raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1);
       let scores;
-      try { scores = JSON.parse(json); } catch { throw new Error('JSON invalide 🤔'); }
+      try { scores = JSON.parse(json); } catch { throw new Error('JSON invalide'); }
       const r = await api('POST', 'admin/scores', { scores });
-      toast(`${plural(r.updated, 'question')} notée${r.updated > 1 ? 's' : ''} ✅`);
+      toast(`${plural(r.updated, 'question')} notée${r.updated > 1 ? 's' : ''}`);
       if (r.errors.length) alert(r.errors.join('\n'));
       document.getElementById('scoresIn').value = '';
       await refresh();
@@ -1299,7 +1343,7 @@
     const m = t.last[0];
     if (!m) return '<i>Aucun message : lance la discussion !</i>';
     const who = m.playerId === state.me.playerId ? 'Toi' : esc(player(m.playerId).name);
-    return `${who} : ${m.deleted ? '<i>message supprimé</i>' : m.kind === 'gif' ? '🎞️ GIF' : esc(m.text)}`;
+    return `${who} : ${m.deleted ? '<i>message supprimé</i>' : m.kind === 'gif' ? 'GIF' : esc(m.text)}`;
   }
 
   function renderChatList(view) {
@@ -1317,7 +1361,7 @@
     const mini = general.last.map((m) => {
       const mine = m.playerId === state.me.playerId;
       const u = player(m.playerId);
-      const text = m.deleted ? '<i>message supprimé</i>' : m.kind === 'gif' ? '🎞️ GIF' : esc(m.text);
+      const text = m.deleted ? '<i>message supprimé</i>' : m.kind === 'gif' ? 'GIF' : esc(m.text);
       return `
         <div class="mini-msg ${mine ? 'mine' : ''}">
           ${mine ? '' : avatar(u, 'xs')}
@@ -1331,13 +1375,13 @@
           <span class="gc-title">👥 Chat du groupe</span>
           ${general.unread ? `<span class="thread-badge">${general.unread}</span>` : general.last.length ? `<span class="small muted">${ago(general.last[general.last.length - 1].at)}</span>` : ''}
         </div>
-        <div class="gc-msgs">${mini || '<p class="muted small" style="margin:8px 0">Aucun message pour l’instant. Dis bonjour 👋</p>'}</div>
+        <div class="gc-msgs">${mini || '<p class="muted small" style="margin:8px 0">Aucun message pour l’instant. Dis bonjour !</p>'}</div>
         <div class="gc-input">Écrire un message…</div>
       </button>
       <div class="section-title">Discussions des sondages</div>
       ${others.length
         ? `<div class="card threads">${others.map((t) => row(t, esc(t.text), esc(setOf(t.setId).emoji))).join('')}</div>`
-        : '<div class="card empty" style="padding:18px">Les discussions sur les questions apparaîtront ici.<br>Commente un sondage depuis l’onglet Live 💬</div>'}`;
+        : '<div class="card empty" style="padding:18px">Les discussions sur les questions apparaîtront ici.<br>Commente un sondage depuis l’onglet Live.</div>'}`;
     view.querySelectorAll('[data-thread]').forEach((b) => (b.onclick = () => openChat(b.dataset.thread)));
   }
 
@@ -1367,7 +1411,7 @@
     const gifLabel = state.chat.gifs === 'tenor' ? 'Rechercher sur Tenor' : 'Rechercher un GIF…';
     $chat.innerHTML = `
       <div class="chat-head">
-        <button class="chat-back" id="chatBack" aria-label="Retour">←</button>
+        <button class="chat-back" id="chatBack" aria-label="Retour">${icon('back')}</button>
         <div class="chat-title" id="chatTitle"></div>
       </div>
       <div class="chat-list" id="chatList"><div class="chat-empty">Chargement…</div></div>
@@ -1380,7 +1424,7 @@
       <form class="chat-input" id="chatForm">
         <button type="button" class="gif-btn" id="gifBtn">GIF</button>
         <textarea id="chatText" rows="1" maxlength="1000" placeholder="Message…" enterkeyhint="send"></textarea>
-        <button type="submit" class="send-btn" aria-label="Envoyer">➤</button>
+        <button type="submit" class="send-btn" aria-label="Envoyer">${icon('send')}</button>
       </form>`;
     $chat.hidden = false;
     document.body.classList.add('noscroll');
@@ -1473,7 +1517,7 @@
     const p = findPoll(chatOpen);
     const t = state.chat.threads.find((x) => x.channel === chatOpen);
     const s = setOf((p || t || {}).setId);
-    const status = p ? (p.ended ? 'terminé' : '⏳ ' + left(p.endsAt)) : '';
+    const status = p ? (p.ended ? 'terminé' : 'encore ' + left(p.endsAt)) : '';
     el.innerHTML = `<b class="clamp2">${esc((p || t || { text: 'Discussion' }).text)}</b><span>${esc(s.emoji)} ${esc(s.name)}${status ? ' · ' + status : ''}</span>`;
   }
 
@@ -1524,7 +1568,7 @@
 
     let html = c.hasMore ? '<button class="chat-older" id="chatOlder">Messages précédents</button>' : '';
     if (!c.messages.length) {
-      html += `<div class="chat-empty">${chatOpen === 'general' ? 'Aucun message pour l’instant. Dis bonjour 👋' : 'Personne n’a encore commenté. Lance le débat 🔥'}</div>`;
+      html += `<div class="chat-empty">${chatOpen === 'general' ? 'Aucun message pour l’instant. Dis bonjour !' : 'Personne n’a encore commenté. Lance le débat !'}</div>`;
     }
     c.messages.forEach((m, i) => {
       const prev = c.messages[i - 1];
@@ -1667,39 +1711,142 @@
     return Uint8Array.from(raw, (c) => c.charCodeAt(0));
   }
 
+  // L'abonnement a-t-il été créé avec la clé actuelle du serveur ? (sinon il faut le refaire)
+  function sameKey(sub) {
+    try {
+      const k = sub.options && sub.options.applicationServerKey;
+      if (!k) return true;
+      const a = new Uint8Array(k);
+      const b = b64ToBytes(state.vapidKey);
+      return a.length === b.length && a.every((x, i) => x === b[i]);
+    } catch {
+      return true;
+    }
+  }
+
+  // (Ré)abonne cet appareil et le déclare au serveur.
+  async function subscribePush() {
+    const reg = swReg || (await swReady);
+    if (!reg || !state.vapidKey) throw new Error('Ce navigateur ne gère pas les notifications');
+    let sub = await reg.pushManager.getSubscription();
+    if (sub && !sameKey(sub)) {
+      await sub.unsubscribe().catch(() => {});
+      sub = null;
+    }
+    if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(state.vapidKey) });
+    await api('POST', 'push/subscribe', { subscription: sub.toJSON() });
+    return sub;
+  }
+
+  // À chaque ouverture : si les notifs sont autorisées, on resynchronise l'abonnement avec le serveur
+  // (un abonnement peut expirer ou changer sans prévenir, surtout sur iPhone).
+  let pushSynced = false;
+  async function syncPush() {
+    if (pushSynced) return;
+    pushSynced = true;
+    try {
+      if (!state.vapidKey || !('Notification' in window) || Notification.permission !== 'granted' || load('pushOff')) return;
+      await subscribePush();
+    } catch (e) {
+      console.warn('Synchro des notifs :', e);
+    }
+  }
+
   async function setupPushButton(pushOk) {
     const btn = document.getElementById('pushBtn');
     const status = document.getElementById('pushStatus');
+    const testBtn = document.getElementById('pushTest');
+    const out = document.getElementById('pushOut');
     if (pushOk && !swReg) swReg = await swReady;
     if (!document.body.contains(btn)) return;
     if (!pushOk || !swReg) {
-      status.textContent = 'Les notifs ne sont pas dispo sur ce navigateur (il faut https ou localhost).';
+      const iOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+      status.textContent = iOS
+        ? 'Sur iPhone, installe d’abord l’app sur l’écran d’accueil (Partager → Sur l’écran d’accueil) et ouvre-la depuis l’icône.'
+        : 'Les notifications ne sont pas disponibles sur ce navigateur.';
+      btn.disabled = true;
       return;
     }
     const sub = await swReg.pushManager.getSubscription();
-    const denied = Notification.permission === 'denied';
-    status.textContent = sub ? 'Activées sur cet appareil ✅' : denied ? 'Bloquées dans les réglages du navigateur 🚫' : 'Désactivées sur cet appareil.';
-    btn.textContent = sub ? 'Désactiver les notifs' : 'Activer les notifs';
-    btn.disabled = denied && !sub;
-    action(btn, async () => {
-      const current = await swReg.pushManager.getSubscription();
-      if (current) {
-        await api('POST', 'push/unsubscribe', { endpoint: current.endpoint });
-        await current.unsubscribe();
-        toast('Notifs désactivées 🔕');
-      } else {
-        const perm = await Notification.requestPermission();
-        if (perm !== 'granted') throw new Error('Notifs refusées 🚫');
-        const s = await swReg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(state.vapidKey) });
-        await api('POST', 'push/subscribe', { subscription: s.toJSON() });
-        toast('Notifs activées 🔔');
+    const perm = Notification.permission;
+    const on = !!sub && perm === 'granted' && !load('pushOff');
+    status.textContent = on
+      ? 'Activées sur cet appareil.'
+      : perm === 'denied'
+        ? 'Bloquées. Autorise les notifications pour cette app dans les réglages du téléphone, puis reviens ici.'
+        : 'Désactivées sur cet appareil.';
+    btn.textContent = on ? 'Désactiver' : 'Activer les notifications';
+    btn.className = on ? 'btn btn-soft' : 'btn btn-main';
+    btn.disabled = perm === 'denied';
+    testBtn.hidden = !on;
+
+    btn.onclick = async () => {
+      btn.disabled = true;
+      try {
+        if (on) {
+          const current = await swReg.pushManager.getSubscription();
+          if (current) {
+            await api('POST', 'push/unsubscribe', { endpoint: current.endpoint });
+            await current.unsubscribe();
+          }
+          save('pushOff', '1');
+          toast('Notifications désactivées');
+        } else {
+          // iPhone : la demande d'autorisation doit partir directement du clic, sans attente avant.
+          const p = Notification.permission === 'granted' ? 'granted' : await Notification.requestPermission();
+          if (p !== 'granted') throw new Error('Autorisation refusée');
+          save('pushOff', null);
+          await subscribePush();
+          toast('Notifications activées');
+        }
+      } catch (e) {
+        toast(e.message);
       }
       setupPushButton(pushOk);
-    });
+    };
+
+    testBtn.onclick = async () => {
+      testBtn.disabled = true;
+      out.textContent = 'Envoi…';
+      try {
+        await subscribePush();
+        const r = await api('POST', 'push/test');
+        out.textContent = !r.devices
+          ? 'Aucun appareil enregistré.'
+          : r.results.map((x) => (x.ok ? `Envoyé (${x.service}) : la notification doit arriver dans quelques secondes.` : `Échec (${x.service}) : ${x.status || ''} ${x.error || ''}`)).join('\n');
+      } catch (e) {
+        out.textContent = e.message;
+      }
+      testBtn.disabled = false;
+    };
   }
 
+  // ---------- Présence : "j'ai l'app à l'écran" (évite les notifs pendant qu'on regarde) ----------
+
+  let presenceTimer = null;
+  function sendPresence(visible) {
+    if (!token) return;
+    fetch('/api/presence', {
+      method: 'POST',
+      keepalive: true,
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+      body: JSON.stringify({ visible }),
+    }).catch(() => {});
+  }
+  function startPresence() {
+    if (presenceTimer || document.hidden) return;
+    sendPresence(true);
+    presenceTimer = setInterval(() => { if (!document.hidden) sendPresence(true); }, 20000);
+  }
+  function stopPresence(notify = true) {
+    clearInterval(presenceTimer);
+    presenceTimer = null;
+    if (notify) sendPresence(false);
+  }
+  window.addEventListener('pagehide', () => stopPresence());
+
   const swReady = 'serviceWorker' in navigator
-    ? navigator.serviceWorker.register('/sw.js').then((r) => (swReg = r)).catch(() => null)
+    ? navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' }).then((r) => (swReg = r)).catch(() => null)
     : Promise.resolve(null);
 
   // ---------- Démarrage ----------
