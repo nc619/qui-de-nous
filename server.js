@@ -21,7 +21,7 @@ const ARCHIVE_PAGE = 30;
 const WORDS = new Set([
   'health', 'groups', 'roster', 'join', 'login', 'logout', 'state', 'archive', 'me', 'polls', 'vote', 'drop',
   'sets', 'questions', 'push', 'subscribe', 'unsubscribe', 'admin', 'players', 'reset', 'settings', 'drop-auto',
-  'unscored', 'scores', 'group', 'code', 'chat', 'read', 'typing', 'events', 'gifs', 'messages', 'presence', 'test',
+  'unscored', 'scores', 'group', 'code', 'chat', 'read', 'typing', 'events', 'gifs', 'messages', 'presence', 'test', 'react',
 ]);
 
 // Questions en plus lancées à la main (bouton +) : 3 par personne et par jour, remise à zéro à minuit
@@ -177,8 +177,12 @@ function msgView(g, m) {
     gif: m.gif,
     at: m.at,
     deleted: !!m.deleted,
+    // Réactions : { playerId: emoji }
+    reactions: m.deleted ? {} : Object.fromEntries(Object.entries(m.reactions || {}).map(([uid, e]) => [g.users[uid]?.playerId, e]).filter(([pid]) => pid)),
   };
 }
+
+const REACTIONS = ['❤️', '😂', '😮', '😢', '🔥', '👍'];
 
 function readsOf(g, channel) {
   const out = {};
@@ -450,6 +454,19 @@ async function api(req, res, url) {
       return ok();
     }
 
+    // Réagir à un message (une réaction par personne ; la même une 2e fois = on l'enlève).
+    case 'POST /chat/:id/messages/:id/react': {
+      const channel = checkChannel(g, id);
+      const m = chat.get(g.id, Number(ids[1]));
+      if (!m || m.channel !== channel || m.deleted) throw new HttpError(404, 'Message introuvable');
+      const emoji = body.emoji == null ? null : String(body.emoji);
+      if (emoji && !REACTIONS.includes(emoji)) throw new HttpError(400, 'Réaction inconnue');
+      const saved = chat.react(g.id, m.seq, me.id, emoji && (m.reactions || {})[me.id] !== emoji ? emoji : null);
+      const view = msgView(g, saved);
+      live.emit(g.id, 'react', { channel, id: m.seq, reactions: view.reactions });
+      return ok({ message: view });
+    }
+
     case 'GET /gifs':
       return ok({ results: await gifs.search(url.searchParams.get('q')) });
 
@@ -471,7 +488,9 @@ async function api(req, res, url) {
       const poll = g.polls[id];
       if (!poll) throw new HttpError(404, 'Sondage introuvable');
       if (poll.endsAt <= now) throw new HttpError(400, 'Trop tard, ce sondage est terminé ⏰');
-      if (!g.players[body.playerId]) throw new HttpError(400, 'Personne inconnue');
+      const nobody = body.playerId === 'nobody';
+      if (nobody && !game.allowsNobody(g, poll.text)) throw new HttpError(400, 'On ne peut pas répondre « Personne » à cette question');
+      if (!nobody && !g.players[body.playerId]) throw new HttpError(400, 'Personne inconnue');
       const firstVote = !poll.votes[me.id];
       poll.votes[me.id] = body.playerId;
       persist();
@@ -688,6 +707,7 @@ async function api(req, res, url) {
         if (!isValidTimezone(body.timezone)) throw new HttpError(400, 'Fuseau horaire inconnu');
         s.timezone = body.timezone;
       }
+      if (body.allowNobody != null) s.allowNobody = !!body.allowNobody;
       if (s.endHour < s.startHour) throw new HttpError(400, 'L’heure de fin doit être après l’heure de début');
       g.settings = s;
       persist();

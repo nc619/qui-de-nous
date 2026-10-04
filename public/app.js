@@ -123,7 +123,9 @@
 
   const plural = (n, word) => `${n} ${word}${n > 1 ? 's' : ''}`;
 
+  const NOBODY = { id: 'nobody', name: 'Personne', emoji: '∅', color: '#8a7aa8' };
   function player(id) {
+    if (id === 'nobody') return NOBODY;
     return state.players.find((p) => p.id === id) || { id, name: '???', emoji: '👻', color: '#999999' };
   }
   function setOf(id) {
@@ -512,6 +514,7 @@
     tab = t;
     save('tab', t);
     editing = null;
+    openPolls.clear();
     renderNav();
     renderView();
     window.scrollTo({ top: 0 });
@@ -522,6 +525,7 @@
     if (!view) return;
     // Pendant l'animation d'un vote, on ne redessine pas l'écran (on le fera juste après).
     if (animating) { pendingRender = true; return; }
+    syncGuard();
     ({ live: renderLive, chat: renderChatList, sets: renderSets, stats: renderStats, me: renderMe }[tab] || renderLive)(view);
   }
 
@@ -546,7 +550,10 @@
           <button class="vote-opt ${p.myVote === u.id ? 'picked' : ''}" data-vote="${p.id}" data-target="${u.id}">
             ${avatar(u, 'sm')}<span>${esc(u.id === state.me.playerId ? u.name + ' (moi)' : u.name)}</span>
           </button>`)
-        .join('')}</div>
+        .join('')}${p.nobody ? `
+          <button class="vote-opt nobody ${p.myVote === 'nobody' ? 'picked' : ''}" data-vote="${p.id}" data-target="nobody">
+            <span class="avatar sm nobody-av">∅</span><span>Personne</span>
+          </button>` : ''}</div>
         ${editing === p.id ? '<button class="link-btn" data-cancel>Annuler</button>' : ''}`;
     } else {
       // Résultats : pour chaque personne votée, le nombre de votes et QUI a voté pour elle.
@@ -618,7 +625,7 @@
     ];
     return `
       <button class="prow ${p.custom ? 'custom' : ''} ${flashId === p.id ? 'flash' : ''}" data-toggle="${p.id}" aria-expanded="false">
-        <span class="prow-av">${leaders.length ? avatar(leaders[0], 'sm') : '<span class="avatar sm empty-av">?</span>'}</span>
+        <span class="prow-set ${setOf(p.setId).spicy ? 'spicy' : ''}" title="${esc(setOf(p.setId).name)}">${esc(setOf(p.setId).emoji)}</span>
         <span class="prow-body">
           <span class="prow-q">${esc(p.text)}</span>
           <span class="prow-meta">${author ? `<span class="prow-by">${icon('pen')}${esc(author.name)}</span>` : ''}${meta.join(' · ')}</span>
@@ -748,7 +755,7 @@
   function liveSwitch() {
     return `
       <div class="seg live-seg">
-        <button type="button" data-live="live" class="${liveMode === 'live' ? 'on' : ''}">En cours${state.live.length ? ` · ${state.live.length}` : ''}</button>
+        <button type="button" data-live="live" class="${liveMode === 'live' ? 'on' : ''}">En cours</button>
         <button type="button" data-live="archive" class="${liveMode === 'archive' ? 'on' : ''}">Archives</button>
       </div>`;
   }
@@ -756,6 +763,7 @@
   function bindLiveSwitch(view) {
     view.querySelectorAll('[data-live]').forEach((b) => (b.onclick = () => {
       liveMode = b.dataset.live;
+      openPolls.clear();
       save('liveMode', liveMode);
       renderView();
       window.scrollTo({ top: 0 });
@@ -793,14 +801,10 @@
     const end = state.nextDrop;
     const start = state.prevDrop && state.prevDrop < end ? state.prevDrop : end - state.settings.intervalHours * 3600e3;
     const frac = Math.min(1, Math.max(0, (now() - start) / (end - start)));
-    const C = 2 * Math.PI * 8;
     return `
       <button class="drop-meter" id="dropMeter" aria-label="Prochaine question dans ${left(end)}">
-        <svg viewBox="0 0 20 20" aria-hidden="true">
-          <circle cx="10" cy="10" r="8" class="dm-track"/>
-          <circle cx="10" cy="10" r="8" class="dm-fill" stroke-dasharray="${C.toFixed(2)}" stroke-dashoffset="${(C * (1 - frac)).toFixed(2)}"/>
-        </svg>
-        <span>${left(end).replace(' h ', 'h')}</span>
+        <span class="dm-row"><span class="dm-label">Prochaine question</span><b>${left(end).replace(' h ', 'h')}</b></span>
+        <span class="dm-bar"><span style="width:${(frac * 100).toFixed(1)}%"></span></span>
       </button>`;
   }
 
@@ -889,6 +893,7 @@
     $sheet.hidden = true;
     $sheet.innerHTML = '';
     document.body.classList.remove('noscroll');
+    syncGuard();
   }
 
   function openSheet(html, bind) {
@@ -896,6 +901,7 @@
     $sheet.hidden = false;
     document.body.classList.add('noscroll');
     $sheet.querySelectorAll('[data-close]').forEach((el) => (el.onclick = closeSheet));
+    syncGuard();
     bind($sheet);
   }
 
@@ -949,7 +955,7 @@
   function renderArchive(view) {
     const data = archiveExtra || { items: state.archive, hasMore: state.archiveHasMore };
     view.innerHTML = `
-      ${liveSwitch()}
+      <div class="live-head">${liveSwitch()}${dropMeter()}</div>
       <div class="filter-row">
         <select class="input" id="archSet">
           <option value="">Tous les sets</option>
@@ -961,6 +967,8 @@
 
     bindPollCards(view);
     bindLiveSwitch(view);
+    const meter = document.getElementById('dropMeter');
+    if (meter) meter.onclick = openDropInfo;
     document.getElementById('archSet').onchange = async (e) => {
       archiveSet = e.target.value;
       try {
@@ -1297,6 +1305,11 @@
       </div>
 
       <div class="card">
+        <div class="card-title">Options de vote</div>
+        <label class="switch-row"><span>Réponse « Personne »<small class="muted">Sur les questions au conditionnel (« Qui ferait… »), on peut voter pour personne.</small></span><input type="checkbox" class="switch" id="allowNobody" ${s.allowNobody ? 'checked' : ''}></label>
+      </div>
+
+      <div class="card">
         <div class="card-title">Questions à noter</div>
         <p class="muted small">Les questions créées par le groupe n’ont pas encore de stats. Copie-les, donne-les à Claude, puis colle sa réponse ici.</p>
         <button class="btn btn-soft btn-block" id="exportQ">Copier les questions à noter</button>
@@ -1352,6 +1365,16 @@
       document.activeElement.blur();
       await refresh();
     });
+    document.getElementById('allowNobody').onchange = async (e) => {
+      try {
+        await api('PATCH', 'admin/settings', { allowNobody: e.target.checked });
+        toast(e.target.checked ? 'Réponse « Personne » activée' : 'Réponse « Personne » désactivée');
+        await refresh();
+      } catch (err) {
+        e.target.checked = !e.target.checked;
+        toast(err.message);
+      }
+    };
     action(document.getElementById('forceDrop'), async () => {
       const { poll } = await api('POST', 'admin/drop-auto');
       replacePoll(poll);
@@ -1457,6 +1480,12 @@
         c.reads[d.playerId] = Math.max(c.reads[d.playerId] || 0, d.seq);
         if (chatOpen === d.channel) renderChatMessages();
       }
+    } else if (type === 'react') {
+      const m = c && c.messages.find((x) => x.id === d.id);
+      if (m) {
+        m.reactions = d.reactions;
+        if (chatOpen === d.channel) renderChatMessages();
+      }
     } else if (type === 'del') {
       const m = c && c.messages.find((x) => x.id === d.id);
       if (m) {
@@ -1540,6 +1569,7 @@
   function openChat(channel) {
     if (chatOpen) closeChat(true);
     chatOpen = channel;
+    selMsg = null;
     const gifLabel = state.chat.gifs === 'tenor' ? 'Rechercher sur Tenor' : 'Rechercher un GIF…';
     $chat.innerHTML = `
       <div class="chat-head">
@@ -1560,7 +1590,7 @@
       </form>`;
     $chat.hidden = false;
     document.body.classList.add('noscroll');
-    history.pushState({ chat: channel }, '');
+    syncGuard();
     renderChatHeader();
     fitChat();
 
@@ -1617,15 +1647,43 @@
     $chat.hidden = true;
     $chat.innerHTML = '';
     document.body.classList.remove('noscroll');
-    if (!silent && history.state && history.state.chat) history.back();
     if (state) {
       renderNav();
       renderView();
     }
   }
 
+  // ---------- Bouton retour (Android) ----------
+  // Une entrée « garde » dans l'historique tant qu'on n'est pas sur l'écran d'accueil (Live, en cours) :
+  // le bouton retour ferme d'abord le chat / la fenêtre ouverte, puis revient à l'onglet Live,
+  // et seulement là il quitte l'app.
+  let popIgnore = false;
+  const atRoot = () => !chatOpen && $sheet.hidden && tab === 'live' && liveMode === 'live' && !openSet && !openPolls.size;
+
+  function syncGuard() {
+    if (!state) return;
+    const guarded = !!(history.state && history.state.guard);
+    if (!atRoot() && !guarded) history.pushState({ guard: true }, '');
+    else if (atRoot() && guarded && !popIgnore) {
+      popIgnore = true;
+      history.back();
+    }
+  }
+
   window.addEventListener('popstate', () => {
+    if (popIgnore) {
+      popIgnore = false;
+      syncGuard();
+      return;
+    }
+    if (!state) return;
     if (chatOpen) closeChat(true);
+    else if (!$sheet.hidden) closeSheet();
+    else if (openSet) { openSet = null; renderView(); }
+    else if (openPolls.size) { openPolls.clear(); editing = null; renderView(); }
+    else if (tab === 'live' && liveMode === 'archive') { liveMode = 'live'; save('liveMode', liveMode); renderView(); window.scrollTo({ top: 0 }); }
+    else if (tab !== 'live') go('live');
+    syncGuard();
   });
 
   // Sur mobile, le clavier réduit la zone visible : la fenêtre de chat suit.
@@ -1677,26 +1735,71 @@
     if (list) list.scrollTop = list.scrollHeight;
   }
 
+  // ---------- Chat : réactions, « vu par », détail d'un message ----------
+
+  const REACTIONS = ['❤️', '😂', '😮', '😢', '🔥', '👍'];
+  let selMsg = null; // message touché : on affiche les réactions, qui l'a vu, et « Supprimer »
+
+  function reactionGroups(m) {
+    const by = new Map();
+    for (const [pid, e] of Object.entries(m.reactions || {})) {
+      if (!by.has(e)) by.set(e, []);
+      by.get(e).push(pid);
+    }
+    return [...by].map(([emoji, players]) => ({ emoji, players })).sort((a, b) => b.players.length - a.players.length);
+  }
+
+  // Qui a vu un message : les membres (sauf l'auteur et moi) qui ont lu jusqu'à ce message.
+  function seenBy(c, m) {
+    const others = state.players.filter((p) => p.claimed && p.id !== m.playerId && p.id !== state.me.playerId);
+    const saw = (p) => (c.reads[p.id] || 0) >= m.id || !!(m.reactions || {})[p.id]; // réagir = avoir vu
+    return { seen: others.filter(saw), unseen: others.filter((p) => !saw(p)) };
+  }
+
+  function namesList(list, max = 3) {
+    const names = list.map((p) => esc(p.name));
+    return names.length <= max ? names.join(', ').replace(/, ([^,]*)$/, ' et $1') : `${names.slice(0, max).join(', ')} et ${names.length - max} autres`;
+  }
+
+  function msgDetail(c, m) {
+    const mine = m.playerId === state.me.playerId;
+    const myReact = (m.reactions || {})[state.me.playerId];
+    const { seen, unseen } = seenBy(c, m);
+    const reacts = reactionGroups(m);
+    const people = (list) => list.map((p) => `<span class="who">${avatar(p, 'xs')}${esc(p.name)}</span>`).join('');
+    return `
+      <div class="msg-detail ${mine ? 'mine' : ''}">
+        <div class="react-bar">${REACTIONS.map((e) => `<button data-react="${e}" data-id="${m.id}" class="${myReact === e ? 'on' : ''}" aria-label="Réagir ${e}">${e}</button>`).join('')}</div>
+        ${reacts.length ? `<div class="md-row"><span class="md-label">Réactions</span><div class="md-people">${reacts.map((r) => `<span class="who">${r.emoji} ${r.players.map((pid) => esc(pid === state.me.playerId ? 'toi' : player(pid).name)).join(', ')}</span>`).join('')}</div></div>` : ''}
+        <div class="md-row"><span class="md-label">Vu par</span><div class="md-people">${seen.length ? people(seen) : '<span class="muted">personne pour l’instant</span>'}</div></div>
+        ${unseen.length ? `<div class="md-row"><span class="md-label">Pas encore vu</span><div class="md-people dim">${people(unseen)}</div></div>` : ''}
+        <div class="md-foot">
+          <span class="muted">${hhmm(m.at)}</span>
+          ${mine || state.me.isAdmin ? `<button class="md-del" data-delmsg="${m.id}">${icon('trash')}Supprimer</button>` : ''}
+        </div>
+      </div>`;
+  }
+
+  async function reactTo(id, emoji) {
+    const channel = chatOpen;
+    try {
+      const { message } = await api('POST', `chat/${channel}/messages/${id}/react`, { emoji });
+      const m = chats.get(channel)?.messages.find((x) => x.id === id);
+      if (m) m.reactions = message.reactions;
+      selMsg = null;
+      if (chatOpen === channel) renderChatMessages();
+    } catch (e) {
+      toast(e.message);
+    }
+  }
+
   function renderChatMessages(forceBottom) {
     const list = document.getElementById('chatList');
     const c = chats.get(chatOpen);
     if (!list || !c) return;
     const atBottom = forceBottom || list.scrollHeight - list.scrollTop - list.clientHeight < 120;
     const myPid = state.me.playerId;
-
-    // Accusés de lecture : chaque personne apparaît sous le dernier message qu'elle a lu.
-    const readAt = new Map();
-    for (const [pid, seq] of Object.entries(c.reads)) {
-      if (pid === myPid) continue;
-      let target = null;
-      for (const m of c.messages) {
-        if (m.id <= seq) target = m;
-        else break;
-      }
-      if (!target || target.playerId === pid) continue;
-      if (!readAt.has(target.id)) readAt.set(target.id, []);
-      readAt.get(target.id).push(pid);
-    }
+    if (selMsg && !c.messages.some((m) => m.id === selMsg && !m.deleted)) selMsg = null;
 
     let html = c.hasMore ? '<button class="chat-older" id="chatOlder">Messages précédents</button>' : '';
     if (!c.messages.length) {
@@ -1716,27 +1819,49 @@
         : m.kind === 'gif'
           ? `<img src="${esc(m.gif.url)}" width="${m.gif.w}" height="${m.gif.h}" alt="GIF" loading="lazy">`
           : esc(m.text);
-      const canDelete = !m.deleted && (mine || state.me.isAdmin);
+      const reacts = reactionGroups(m);
+      const sel = selMsg === m.id;
       html += `
-        <div class="msg ${mine ? 'mine' : ''} ${first ? 'first' : ''} ${last ? 'last' : ''}">
+        <div class="msg ${mine ? 'mine' : ''} ${first ? 'first' : ''} ${last ? 'last' : ''} ${sel ? 'sel' : ''}">
           ${mine ? '' : last ? avatar(u, 'sm') : '<span class="avatar-space"></span>'}
           <div class="msg-body">
             ${!mine && first ? `<div class="msg-name">${esc(u.name)}</div>` : ''}
-            <div class="bubble ${m.kind === 'gif' && !m.deleted ? 'gif' : ''} ${m.deleted ? 'deleted' : ''}" ${canDelete ? `data-delmsg="${m.id}"` : ''}>${content}</div>
-            ${last ? `<div class="msg-time">${hhmm(m.at)}</div>` : ''}
+            <div class="bubble ${m.kind === 'gif' && !m.deleted ? 'gif' : ''} ${m.deleted ? 'deleted' : ''}" ${m.deleted ? '' : `data-msg="${m.id}"`}>${content}</div>
+            ${reacts.length ? `<button class="reacts" data-msg="${m.id}">${reacts.map((r) => `<span class="${r.players.includes(myPid) ? 'me' : ''}">${r.emoji}${r.players.length > 1 ? `<i>${r.players.length}</i>` : ''}</span>`).join('')}</button>` : ''}
+            ${last && !sel ? `<div class="msg-time">${hhmm(m.at)}</div>` : ''}
           </div>
-        </div>`;
-      const readers = readAt.get(m.id);
-      if (readers) html += `<div class="read-row ${mine ? 'mine' : ''}" title="Vu par ${esc(readers.map((pid) => player(pid).name).join(', '))}">${readers.map((pid) => avatar(player(pid), 'xs')).join('')}</div>`;
+        </div>
+        ${sel ? msgDetail(c, m) : ''}`;
     });
+    // Accusé de lecture, en clair, sous le dernier message seulement (le détail : en touchant un message).
+    const lastMsg = c.messages[c.messages.length - 1];
+    if (lastMsg && selMsg !== lastMsg.id) {
+      const { seen, unseen } = seenBy(c, lastMsg);
+      const mineLast = lastMsg.playerId === myPid;
+      let label = '';
+      if (seen.length && !unseen.length) label = 'Vu par tout le monde';
+      else if (seen.length) label = `Vu par ${namesList(seen)}`;
+      else if (mineLast) label = 'Envoyé';
+      if (label) html += `<div class="seen-line ${mineLast ? 'mine' : ''}">${icon('check')}<span>${label}</span></div>`;
+    }
     list.innerHTML = html;
 
     list.querySelectorAll('img').forEach((img) => (img.onload = () => { if (atBottom) scrollChatBottom(); }));
+    list.querySelectorAll('[data-msg]').forEach((b) => {
+      b.onclick = () => {
+        const id = Number(b.dataset.msg);
+        selMsg = selMsg === id ? null : id;
+        renderChatMessages();
+        if (selMsg) document.querySelector('.msg-detail')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      };
+    });
+    list.querySelectorAll('[data-react]').forEach((b) => (b.onclick = () => reactTo(Number(b.dataset.id), b.dataset.react)));
     list.querySelectorAll('[data-delmsg]').forEach((b) => {
       b.onclick = async () => {
-        if (!confirm('Supprimer ce message ?')) return;
+        if (!confirm('Supprimer ce message pour tout le monde ?')) return;
         try {
           await api('DELETE', `chat/${chatOpen}/messages/${b.dataset.delmsg}`);
+          selMsg = null;
         } catch (e) { toast(e.message); }
       };
     });
