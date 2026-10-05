@@ -25,7 +25,7 @@ const WORDS = new Set([
   'health', 'groups', 'roster', 'join', 'login', 'logout', 'state', 'archive', 'me', 'polls', 'vote', 'drop',
   'sets', 'questions', 'push', 'subscribe', 'unsubscribe', 'admin', 'players', 'reset', 'settings', 'drop-auto',
   'unscored', 'scores', 'group', 'code', 'chat', 'read', 'typing', 'events', 'gifs', 'messages', 'presence', 'test', 'react', 'photos', 'photo',
-  'images', 'image', 'rate', 'ratings',
+  'images', 'image', 'rate', 'ratings', 'account', 'accounts', 'recover', 'recovery', 'link',
 ]);
 
 // Petit raccourci pour les textes envoyés aux gens (notifications) : français ou anglais selon leur réglage.
@@ -122,20 +122,109 @@ function addPlayer(g, name) {
   return player;
 }
 
-function newUser(g, player, pin, isAdmin) {
-  const salt = crypto.randomBytes(16).toString('hex');
-  const user = { id: newId(), playerId: player.id, salt, pinHash: hashPin(pin, salt), isAdmin, createdAt: Date.now() };
+function newUser(g, player, account, isAdmin) {
+  const user = { id: newId(), playerId: player.id, accountId: account.id, isAdmin, lang: account.lang || null, createdAt: Date.now() };
   g.users[user.id] = user;
   player.userId = user.id;
   return user;
 }
 
-function newSession(g, user) {
+// ---------- Comptes : un par personne, avec plusieurs groupes ----------
+// Le compte porte l'identifiant + le PIN. Dans chaque groupe, la personne a son propre pseudo/photo/couleur
+// (le « membre » du groupe : g.users[…], relié au compte par accountId). Rien d'autre ne change dans les groupes.
+
+function newSession(account) {
   const token = crypto.randomBytes(24).toString('hex');
-  store.db.sessions[token] = { groupId: g.id, userId: user.id, createdAt: Date.now() };
+  store.db.sessions[token] = { accountId: account.id, createdAt: Date.now() };
   persist();
   return token;
 }
+
+function cleanUsername(name, exceptId) {
+  const u = String(name || '').trim();
+  if (!/^[\p{L}\p{N}._-]{3,20}$/u.test(u)) {
+    throw new HttpError(400, 'L’identifiant doit faire 3 à 20 caractères (lettres, chiffres, . _ -), sans espace', 'Your username must be 3 to 20 characters (letters, numbers, . _ -), no spaces');
+  }
+  const n = u.toLowerCase();
+  if (Object.values(store.db.accounts).some((a) => a.id !== exceptId && a.username && a.username.toLowerCase() === n)) {
+    throw new HttpError(409, 'Cet identifiant est déjà pris', 'That username is already taken');
+  }
+  return u;
+}
+
+function newAccount(username, pin, lang) {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const account = { id: newId(), username, salt, pinHash: hashPin(pin, salt), lang: lang ? i18n.lang(lang) : null, createdAt: Date.now() };
+  store.db.accounts[account.id] = account;
+  return account;
+}
+
+const accountByName = (name) => {
+  const n = String(name || '').trim().toLowerCase();
+  return n ? Object.values(store.db.accounts).find((a) => a.username && a.username.toLowerCase() === n) : null;
+};
+
+// Les groupes d'un compte : [{ g, user }].
+function membersOf(account) {
+  const out = [];
+  for (const g of Object.values(store.db.groups)) {
+    for (const user of Object.values(g.users)) if (user.accountId === account.id && !user.disabled) out.push({ g, user });
+  }
+  return out;
+}
+const memberIn = (g, account) => Object.values(g.users).find((u) => u.accountId === account.id && !u.disabled) || null;
+
+// Rejoindre un groupe en prenant un nom de la liste (le compte n'a pas encore de nom dans ce groupe).
+function claimPlayer(g, account, playerId, name) {
+  if (memberIn(g, account)) throw new HttpError(409, 'Tu fais déjà partie de ce groupe', 'You’re already in this group');
+  const player = g.players[playerId];
+  if (!player) throw new HttpError(400, 'Choisis ton nom dans la liste');
+  if (player.userId) throw new HttpError(409, 'Quelqu’un a déjà pris ce nom');
+  if (name && String(name).trim() !== player.name) player.name = cleanName(g, name, player.id);
+  // Si l'admin avait détaché ce nom d'un compte, on reprend le même membre : il garde ses votes.
+  let user = Object.values(g.users).find((u) => u.playerId === player.id);
+  if (user) {
+    Object.assign(user, { accountId: account.id, disabled: false, lang: account.lang || user.lang || null });
+    delete user.pinHash;
+    delete user.salt;
+    player.userId = user.id;
+  } else user = newUser(g, player, account, false);
+  persist();
+  return user;
+}
+
+// Petit résumé de chaque groupe pour l'accueil (le « lobby ») : à voter, messages non lus, activité.
+function lobbyFor(account, now) {
+  const groups = membersOf(account).map(({ g, user }) => {
+    game.tick(g, now);
+    const todo = Object.values(g.polls).filter((p) => p.endsAt > now && !p.votes[user.id]).length;
+    const unread = chatThreads(g, user, now).reduce((n, t) => n + t.unread, 0);
+    const lastPoll = Math.max(0, ...Object.values(g.polls).map((p) => p.startsAt));
+    const lastMsg = (chat.list(g.id, 'general').at(-1) || {}).at || 0;
+    const player = g.players[user.playerId];
+    return {
+      id: g.id,
+      name: g.name,
+      code: g.code,
+      isAdmin: !!user.isAdmin,
+      me: player ? publicPlayer(player, g) : null,
+      members: Object.values(g.players).filter((p) => p.userId).length,
+      todo,
+      unread,
+      activity: Math.max(lastPoll, lastMsg, g.createdAt || 0),
+    };
+  }).sort((a, b) => b.activity - a.activity);
+  return {
+    now,
+    account: { id: account.id, username: account.username || null, lang: account.lang || null },
+    groups,
+    vapidKey: push.publicKey(),
+  };
+}
+
+// Code de récupération (PIN oublié) : donné par un admin d'un des groupes, valable 48 h, une seule fois.
+const RECOVERY_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+const sha = (s) => crypto.createHash('sha256').update(String(s)).digest('hex');
 
 // Limite simple des tentatives ratées (anti-devinette de code / PIN).
 const failures = new Map();
@@ -151,6 +240,27 @@ function guarded(ip, fn) {
     }
     throw e;
   }
+}
+
+// Pas plus de 30 comptes créés par heure et par IP (une soirée où tout le monde s'inscrit sur le même wifi passe).
+const signups = new Map();
+function checkSignupRate(ip) {
+  const now = Date.now();
+  const list = (signups.get(ip) || []).filter((t) => now - t < 3600 * 1000);
+  if (list.length >= 30) throw new HttpError(429, 'Trop de comptes créés, réessaie plus tard.', 'Too many accounts created, try again later.');
+  list.push(now);
+  signups.set(ip, list);
+}
+
+// Connexion « à l'ancienne » (code du groupe + pseudo + PIN) → le compte de ce membre.
+function legacyAccount(code, name, pin) {
+  const g = groupByCode(code);
+  const n = String(name || '').trim().toLowerCase();
+  const player = Object.values(g.players).find((p) => p.name.toLowerCase() === n);
+  const user = player && player.userId && g.users[player.userId];
+  const account = user && !user.disabled && store.db.accounts[user.accountId];
+  if (!account || !checkPin(String(pin || ''), account)) throw new HttpError(401, 'Pseudo ou PIN incorrect');
+  return account;
 }
 
 // Pas plus de 5 groupes créés par heure et par IP.
@@ -355,9 +465,12 @@ function notifyVote(g, me, poll) {
 // Pastille de l'app pour une personne : questions pas encore votées + messages non lus.
 push.setBadgeCounter((g, u) => {
   const now = Date.now();
-  const todo = Object.values(g.polls).filter((p) => p.endsAt > now && !p.votes[u.id]).length;
-  const unread = chatThreads(g, u, now).reduce((n, t) => n + t.unread, 0);
-  return todo + unread;
+  const count = (grp, user) => {
+    const todo = Object.values(grp.polls).filter((p) => p.endsAt > now && !p.votes[user.id]).length;
+    return todo + chatThreads(grp, user, now).reduce((n, t) => n + t.unread, 0);
+  };
+  const account = u.accountId && store.db.accounts[u.accountId];
+  return account ? membersOf(account).reduce((n, m) => n + count(m.g, m.user), 0) : count(g, u);
 });
 
 // Anti-spam : 15 messages par tranche de 10 secondes.
@@ -385,7 +498,7 @@ function stateFor(g, me, now) {
   const threads = chatThreads(g, me, now);
   return {
     now,
-    group: { name: g.name, code: g.code },
+    group: { id: g.id, name: g.name, code: g.code },
     me: { userId: me.id, playerId: me.playerId, isAdmin: !!me.isAdmin, notif: push.prefs(me), dropsLeft: dropsLeft(g, me.id, now), dropsPerDay: DAILY_DROPS, lang: me.lang || null },
     colors: COLORS,
     players: Object.values(g.players).sort((a, b) => a.createdAt - b.createdAt).map((p) => publicPlayer(p, g)),
@@ -452,22 +565,28 @@ async function api(req, res, url) {
       return res.end(ph.buf);
     }
 
-    case 'POST /groups':
+    // Créer son compte (identifiant + PIN). Les groupes se rejoignent / se créent ensuite depuis l'accueil.
+    case 'POST /accounts':
       return guarded(ip, () => {
-        const name = cleanText(body.groupName, 2, 40, 'Le nom du groupe', 'The group name');
+        const username = cleanUsername(body.username);
         const pin = validPin(body.pin);
-        checkCreationRate(ip);
-        const g = newGroup(name);
-        const player = addPlayer(g, body.name);
-        player.emoji = cleanEmoji(body.emoji);
-        const user = newUser(g, player, pin, true);
-        if (body.lang) user.lang = i18n.lang(body.lang);
-        g.colorsV2 = true;
-        game.mergeSeed(g);
-        // Pas de drop immédiat à la création : le premier arrive au prochain créneau.
-        g.lastAutoSlot = latestSlot(now, g.settings);
-        db.groups[g.id] = g;
-        ok({ token: newSession(g, user), code: g.code });
+        checkSignupRate(ip);
+        const account = newAccount(username, pin, body.lang);
+        ok({ token: newSession(account) });
+      });
+
+    // PIN oublié : identifiant + code de récupération donné par un admin → nouveau PIN.
+    case 'POST /account/recover':
+      return guarded(ip, () => {
+        const account = accountByName(body.username);
+        const code = String(body.code || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+        const r = account && account.recovery;
+        if (!r || r.expires < now || r.hash !== sha(code)) throw new HttpError(401, 'Identifiant ou code incorrect (ou code expiré)', 'Wrong username or code (or the code expired)');
+        const pin = validPin(body.pin);
+        account.salt = crypto.randomBytes(16).toString('hex');
+        account.pinHash = hashPin(pin, account.salt);
+        delete account.recovery;
+        ok({ token: newSession(account) });
       });
 
     case 'POST /roster':
@@ -477,49 +596,25 @@ async function api(req, res, url) {
         ok({ group: { name: g.name, code: g.code }, players });
       });
 
-    case 'POST /join':
-      return guarded(ip, () => {
-        const g = groupByCode(body.code);
-        const player = g.players[body.playerId];
-        if (!player) throw new HttpError(400, 'Choisis ton nom dans la liste');
-        if (player.userId) throw new HttpError(409, 'Quelqu’un a déjà pris ce nom');
-        const pin = validPin(body.pin);
-        if (body.name && body.name.trim() !== player.name) player.name = cleanName(g, body.name, player.id);
-        player.emoji = cleanEmoji(body.emoji);
-        // Si l'admin a réinitialisé ce compte, on reprend le même utilisateur (garde ses votes).
-        let user = Object.values(g.users).find((u) => u.playerId === player.id);
-        if (user) {
-          user.salt = crypto.randomBytes(16).toString('hex');
-          user.pinHash = hashPin(pin, user.salt);
-          user.disabled = false;
-          player.userId = user.id;
-        } else user = newUser(g, player, pin, false);
-        if (body.lang) user.lang = i18n.lang(body.lang);
-        ok({ token: newSession(g, user) });
-      });
-
+    // Connexion : identifiant + PIN. Ancienne façon (avant les comptes) : code du groupe + pseudo + PIN.
     case 'POST /login':
       return guarded(ip, () => {
-        const g = groupByCode(body.code);
-        const name = String(body.name || '').trim().toLowerCase();
-        const player = Object.values(g.players).find((p) => p.name.toLowerCase() === name);
-        const user = player && player.userId && g.users[player.userId];
-        if (!user || user.disabled || !checkPin(String(body.pin || ''), user)) throw new HttpError(401, 'Pseudo ou PIN incorrect');
-        ok({ token: newSession(g, user) });
+        const pin = String(body.pin || '');
+        if (body.username != null) {
+          const account = accountByName(body.username);
+          if (!account || !checkPin(pin, account)) throw new HttpError(401, 'Identifiant ou PIN incorrect', 'Wrong username or PIN');
+          return ok({ token: newSession(account) });
+        }
+        const account = legacyAccount(body.code, body.name, pin);
+        ok({ token: newSession(account), needsUsername: !account.username });
       });
   }
 
-  // --- Routes connectées ---
+  // --- Routes connectées : d'abord celles du compte (accueil), puis celles d'un groupe ---
   const token = (req.headers.authorization || '').replace(/^Bearer /, '');
   const session = db.sessions[token];
-  const g = session && db.groups[session.groupId];
-  const me = g && g.users[session.userId];
-  if (!me || me.disabled) throw new HttpError(401, 'Non connecté');
-  game.tick(g, now);
-  const myPlayer = g.players[me.playerId];
-  const requireAdmin = () => {
-    if (!me.isAdmin) throw new HttpError(403, 'Réservé à l’admin');
-  };
+  const account = session && db.accounts[session.accountId];
+  if (!account) throw new HttpError(401, 'Non connecté');
 
   switch (route) {
     case 'POST /logout':
@@ -527,6 +622,97 @@ async function api(req, res, url) {
       persist();
       return ok();
 
+    case 'GET /account':
+      return ok(lobbyFor(account, now));
+
+    case 'PATCH /account': {
+      if (body.username != null) account.username = cleanUsername(body.username, account.id);
+      if (body.lang != null) {
+        account.lang = i18n.lang(body.lang);
+        for (const m of membersOf(account)) m.user.lang = account.lang; // notifications dans la bonne langue partout
+      }
+      if (body.pin != null) {
+        if (!checkPin(String(body.oldPin || ''), account)) throw new HttpError(401, 'Ancien PIN incorrect', 'Wrong current PIN');
+        const pin = validPin(body.pin);
+        account.salt = crypto.randomBytes(16).toString('hex');
+        account.pinHash = hashPin(pin, account.salt);
+      }
+      persist();
+      return ok(lobbyFor(account, now));
+    }
+
+    // Nouveau groupe : on en devient l'admin, avec un pseudo dans ce groupe.
+    case 'POST /groups': {
+      const name = cleanText(body.groupName, 2, 40, 'Le nom du groupe', 'The group name');
+      checkCreationRate(ip);
+      const g = newGroup(name);
+      const player = addPlayer(g, body.name || account.username);
+      newUser(g, player, account, true);
+      g.colorsV2 = true;
+      game.mergeSeed(g);
+      // Pas de drop immédiat à la création : le premier arrive au prochain créneau.
+      g.lastAutoSlot = latestSlot(now, g.settings);
+      db.groups[g.id] = g;
+      persist();
+      return ok({ groupId: g.id, code: g.code });
+    }
+
+    // Rejoindre un groupe avec son code, en choisissant son nom dans la liste.
+    case 'POST /groups/join':
+      return guarded(ip, () => {
+        const g = groupByCode(body.code);
+        claimPlayer(g, account, body.playerId, body.name);
+        ok({ groupId: g.id });
+      });
+
+    // Rattacher à ce compte un groupe où on avait déjà un compte « à l'ancienne » (code + pseudo + PIN).
+    case 'POST /account/link':
+      return guarded(ip, () => {
+        const g = groupByCode(body.code);
+        const name = String(body.name || '').trim().toLowerCase();
+        const player = Object.values(g.players).find((p) => p.name.toLowerCase() === name);
+        const user = player && player.userId && g.users[player.userId];
+        const other = user && db.accounts[user.accountId];
+        if (!user || user.disabled || !other || !checkPin(String(body.pin || ''), other)) throw new HttpError(401, 'Pseudo ou PIN incorrect');
+        if (other.id === account.id) return ok({ groupId: g.id });
+        if (memberIn(g, account)) throw new HttpError(409, 'Tu as déjà un autre nom dans ce groupe', 'You already have another name in this group');
+        // L'ancien compte ne sert plus que s'il a d'autres groupes ; sinon on le fond dans celui-ci.
+        user.accountId = account.id;
+        user.lang = account.lang || user.lang || null;
+        if (!membersOf(other).length) {
+          for (const s of Object.values(db.sessions)) if (s.accountId === other.id) s.accountId = account.id;
+          delete db.accounts[other.id];
+        }
+        persist();
+        ok({ groupId: g.id });
+      });
+
+    // Notifications : ce téléphone reçoit celles de tous les groupes du compte.
+    case 'POST /push/subscribe':
+      if (!push.subscribeAccount(membersOf(account), body.subscription)) throw new HttpError(400, 'Abonnement invalide');
+      return ok();
+
+    case 'POST /push/unsubscribe':
+      push.unsubscribeEverywhere(body.endpoint);
+      return ok();
+  }
+
+  // Routes d'un groupe : le groupe affiché est indiqué par l'app (en-tête X-Group).
+  const gid = req.headers['x-group'] || url.searchParams.get('g');
+  const g = gid && db.groups[gid];
+  const me = g && memberIn(g, account);
+  if (!me) {
+    const e = new HttpError(403, 'Tu ne fais pas (ou plus) partie de ce groupe', 'You’re not in this group (anymore)');
+    e.code = 'no-group';
+    throw e;
+  }
+  game.tick(g, now);
+  const myPlayer = g.players[me.playerId];
+  const requireAdmin = () => {
+    if (!me.isAdmin) throw new HttpError(403, 'Réservé à l’admin');
+  };
+
+  switch (route) {
     case 'GET /state':
       return ok(stateFor(g, me, now));
 
@@ -654,7 +840,10 @@ async function api(req, res, url) {
     case 'PATCH /me':
       if (body.name != null) myPlayer.name = cleanName(g, body.name, myPlayer.id);
       if (body.emoji) myPlayer.emoji = cleanEmoji(body.emoji);
-      if (body.lang != null) me.lang = i18n.lang(body.lang);
+      if (body.lang != null) {
+        account.lang = i18n.lang(body.lang);
+        for (const m of membersOf(account)) m.user.lang = account.lang;
+      }
       // Couleur : une des 16, pas déjà prise par quelqu'un d'autre.
       if (body.color != null) {
         const c = String(body.color).toLowerCase();
@@ -816,15 +1005,7 @@ async function api(req, res, url) {
       return ok();
     }
 
-    // --- Notifications ---
-    case 'POST /push/subscribe':
-      if (!push.subscribe(g, me.id, body.subscription)) throw new HttpError(400, 'Abonnement invalide');
-      return ok();
-
-    case 'POST /push/unsubscribe':
-      push.unsubscribe(g, me.id, body.endpoint);
-      return ok();
-
+    // --- Notifications (abonnement : voir les routes du compte) ---
     // Envoie tout de suite une notif de test à soi-même et renvoie le résultat par appareil.
     case 'POST /push/test': {
       const devices = (g.pushSubs[me.id] || []).length;
@@ -885,11 +1066,25 @@ async function api(req, res, url) {
       if (user.isAdmin) throw new HttpError(400, 'Impossible de réinitialiser l’admin');
       user.disabled = true;
       user.pinHash = null;
-      for (const [t, s] of Object.entries(db.sessions)) if (s.userId === user.id) delete db.sessions[t];
       delete g.pushSubs[user.id];
       player.userId = null;
       persist();
       return ok();
+    }
+
+    // PIN oublié : code à donner à la personne (valable 48 h). Elle choisit un nouveau PIN avec son identifiant.
+    case 'POST /admin/players/:id/recovery': {
+      requireAdmin();
+      const player = g.players[id];
+      const user = player && player.userId && g.users[player.userId];
+      const target = user && db.accounts[user.accountId];
+      if (!target) throw new HttpError(404, 'Ce nom n’a pas de compte');
+      if (target.id === account.id) throw new HttpError(400, 'C’est ton propre compte : change ton PIN depuis l’accueil', 'That’s your own account: change your PIN from the home screen');
+      let code = '';
+      for (const b of crypto.randomBytes(8)) code += RECOVERY_CHARS[b % RECOVERY_CHARS.length];
+      target.recovery = { hash: sha(code), expires: now + 48 * 3600 * 1000, by: me.id };
+      persist();
+      return ok({ code, username: target.username || null });
     }
 
     case 'DELETE /admin/players/:id': {
@@ -1058,7 +1253,7 @@ const server = http.createServer(async (req, res) => {
       if (!(e instanceof HttpError)) console.error(e);
       // Le client envoie sa langue (en-tête X-Lang) : erreurs en anglais si l'app est en anglais.
       const lang = req.headers['x-lang'];
-      if (!res.headersSent) send(res, e.status || 500, { error: i18n.errorText(e instanceof HttpError ? e : new HttpError(500, 'Erreur serveur'), lang) });
+      if (!res.headersSent) send(res, e.status || 500, { error: i18n.errorText(e instanceof HttpError ? e : new HttpError(500, 'Erreur serveur'), lang), ...(e.code && e instanceof HttpError ? { code: e.code } : {}) });
     }
   } else {
     serveStatic(res, url);

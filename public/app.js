@@ -25,6 +25,9 @@
   let pollTimer = null;
   let swReg = null;
   let inviteCode = new URLSearchParams(location.search).get('code');
+  let pendingGroup = new URLSearchParams(location.search).get('g'); // groupe à ouvrir (lien d'une notification)
+  let account = null; // accueil : { account, groups, vapidKey }
+  let groupId = null; // groupe ouvert (null = accueil)
   const openPolls = new Set(); // sondages déjà votés / archivés dépliés par l'utilisateur
   const openVoters = new Set(); // barres de résultats dont on a déroulé la liste des votants ("sondage:personne")
   let animating = false; // animation de vote en cours
@@ -333,16 +336,20 @@
     try {
       res = await fetch('/api/' + url, {
         method,
-        headers: { 'Content-Type': 'application/json', 'X-Lang': LANG, ...(token ? { Authorization: 'Bearer ' + token } : {}) },
+        headers: { 'Content-Type': 'application/json', 'X-Lang': LANG, ...(token ? { Authorization: 'Bearer ' + token } : {}), ...(groupId ? { 'X-Group': groupId } : {}) },
         body: body ? JSON.stringify(body) : undefined,
       });
     } catch {
       throw new Error(T('Pas de connexion au serveur 📡', 'Can’t reach the server 📡'));
     }
     const data = await res.json().catch(() => ({}));
-    if (res.status === 401 && token && !url.startsWith('login')) {
+    if (res.status === 401 && token && !/^(login|accounts|account\/recover|account\/link)/.test(url) && !(url === 'account' && method === 'PATCH')) {
       logoutLocal();
       throw new Error(T('Session expirée, reconnecte-toi', 'Session expired, log in again'));
+    }
+    if (res.status === 403 && data.code === 'no-group' && groupId) {
+      leaveGroup();
+      throw new Error(data.error);
     }
     if (!res.ok) throw new Error(data.error || (res.status === 413 ? T('Trop lourd 😬', 'Too big 😬') : T('Oups, erreur', 'Oops, something broke')));
     return data;
@@ -365,136 +372,438 @@
     };
   }
 
-  // ---------- Connexion ----------
-
-  // mode : 'join' (code → choisir son nom), 'create' (nouveau groupe), 'login' (code + pseudo + PIN)
+  // ---------- Compte : connexion, inscription ----------
+  // Un compte par personne (identifiant + PIN), avec plusieurs groupes. Dans chaque groupe on a son propre
+  // pseudo, sa photo et sa couleur. Les comptes d'avant les comptes multi-groupes se connectent encore
+  // « à l'ancienne » (code du groupe + pseudo + PIN), puis choisissent un identifiant une fois.
+  // mode : 'signup' (créer un compte), 'login' (identifiant + PIN), 'legacy' (à l'ancienne), 'recover' (PIN oublié)
   function renderAuth(mode, err = '') {
     stopPolling();
+    stopLobbyPolling();
     closeSheet();
-    mode = mode || (load('joined') ? 'login' : 'join');
-    let photoData = null; // photo choisie avant de rejoindre (envoyée une fois connecté)
-    let roster = null; // { group, players } une fois le code validé
-    let picked = null;
+    mode = mode || (load('joined') ? 'login' : 'signup');
 
-    const codeField = (hint) => `
-      <label for="code">${T('Code du groupe', 'Group code')}</label>
-      <input class="input code-input" id="code" required autocapitalize="characters" autocomplete="off" maxlength="12" placeholder="${hint}" value="${esc(load('code') || '')}">`;
-
-    const photoField = (p) => `
-      <label>${T('Ta photo', 'Your photo')} <span class="muted">${T('(optionnel)', '(optional)')}</span></label>
-      <button type="button" class="photo-pick" id="authPhoto">
-        ${photoData ? `<span class="avatar lg has-photo" style="--pc:${esc(p.color)}"><img src="${photoData}" alt=""></span>` : avatar({ ...p, photo: null }, 'lg')}
-        <span>${photoData ? T('Changer la photo', 'Change photo') : T('Choisir une photo', 'Pick a photo')}<small class="muted">${T('Sinon, tu gardes cet animal', 'Otherwise you keep this animal')}</small></span>
-      </button>`;
+    const userField = (label, hint) => `
+      <label for="username">${label}</label>
+      <input class="input" id="username" required maxlength="20" autocapitalize="none" autocomplete="username" spellcheck="false" placeholder="${T('Ex : nico_c', 'e.g. nico_c')}" value="${esc(mode === 'signup' ? '' : load('username') || '')}">
+      ${hint ? `<p class="field-hint">${hint}</p>` : ''}`;
 
     const draw = () => {
       let fields = '';
-      if (mode === 'create') {
+      if (mode === 'signup') {
         fields = `
-          <div class="info">${T('👑 Tu seras l’admin : tu ajouteras ensuite les noms de tes potes, et tu auras un code à leur envoyer.', '👑 You’ll be the admin: next you add your mates’ names, and you get a code to send them.')}</div>
-          <label for="groupName">${T('Nom du groupe', 'Group name')}</label>
-          <input class="input" id="groupName" required maxlength="40" placeholder="${T('Ex : Les Bouffons', 'Ex: The Clowns')}">
-          <label for="name">${T('Ton pseudo', 'Your name')}</label>
-          <input class="input" id="name" required maxlength="24" placeholder="${T('Ton petit nom', 'What your mates call you')}">
-          ${pinField()}
-          ${photoField({ id: 'me', color: '#e63946', animal: 0, name: '' })}`;
+          ${userField(T('Choisis un identifiant', 'Pick a username'), T('Unique dans toute l’app. Tu t’en sers pour te connecter, pour tous tes groupes.', 'Unique across the app. You log in with it, for all your groups.'))}
+          ${pinField()}`;
       } else if (mode === 'login') {
         fields = `
-          ${codeField('Ex : K7QM2P')}
-          <label for="name">${T('Pseudo', 'Name')}</label>
-          <input class="input" id="name" required maxlength="24" placeholder="${T('Ton pseudo dans le groupe', 'Your name in the group')}" value="${esc(load('lastName') || '')}">
+          ${userField(T('Identifiant', 'Username'))}
           ${pinField()}`;
-      } else if (!roster) {
-        fields = codeField(T('Demande-le à tes potes', 'Ask your mates for it'));
+      } else if (mode === 'legacy') {
+        fields = `
+          <div class="info">${T('Tu avais un compte avant la mise à jour ? Connecte-toi comme avant : code du groupe, pseudo et PIN. Tu choisiras ensuite un identifiant.', 'Had an account before the update? Log in like before: group code, name and PIN. Then you’ll pick a username.')}</div>
+          <label for="code">${T('Code du groupe', 'Group code')}</label>
+          <input class="input code-input" id="code" required autocapitalize="characters" autocomplete="off" maxlength="12" placeholder="Ex : K7QM2P" value="${esc(load('code') || '')}">
+          <label for="name">${T('Pseudo dans ce groupe', 'Your name in that group')}</label>
+          <input class="input" id="name" required maxlength="24" value="${esc(load('lastName') || '')}">
+          ${pinField()}`;
       } else {
         fields = `
-          <div class="info">${T('Groupe', 'Group')} <b>${esc(roster.group.name)}</b> · <button type="button" class="link" id="otherCode">${T('changer de code', 'use another code')}</button></div>
-          <label>${T('Qui es-tu ?', 'Who are you?')}</label>
-          ${roster.players.length ? `<div class="pick-grid">${roster.players.map((p) => `
-            <button type="button" class="choice ${picked && picked.id === p.id ? 'picked' : ''}" data-pick="${p.id}">${avatar(p)}<span>${esc(p.name)}</span></button>`).join('')}</div>`
-            : `<div class="info">${T('Tout le monde a déjà rejoint. Demande à l’admin de t’ajouter.', 'Everyone already joined. Ask the admin to add you.')}</div>`}
-          ${picked ? `
-            <label for="name">${T('Ton pseudo (tu peux le changer)', 'Your name (you can change it)')}</label>
-            <input class="input" id="name" required maxlength="24" value="${esc(picked.name)}">
-            ${pinField()}
-            ${photoField(picked)}` : ''}`;
+          <div class="info">${T('Demande à l’admin d’un de tes groupes un <b>code de récupération</b> (Moi → Admin → 🔑 à côté de ton nom). Il marche 48 h.', 'Ask the admin of one of your groups for a <b>recovery code</b> (Me → Admin → 🔑 next to your name). It works for 48 h.')}</div>
+          ${userField(T('Identifiant', 'Username'))}
+          <label for="rcode">${T('Code de récupération', 'Recovery code')}</label>
+          <input class="input code-input" id="rcode" required autocapitalize="characters" autocomplete="off" maxlength="12">
+          ${pinField(T('Nouveau PIN (4 à 6 chiffres)', 'New PIN (4 to 6 digits)'))}`;
       }
-      const label = mode === 'create' ? T('Créer le groupe', 'Create the group') : mode === 'login' ? T('Entrer', 'Log in') : roster ? T('C’est parti', 'Let’s go') : T('Continuer →', 'Continue →');
-      const hideBtn = mode === 'join' && roster && !picked;
+      const label = { signup: T('Créer mon compte', 'Create my account'), login: T('Entrer', 'Log in'), legacy: T('Entrer', 'Log in'), recover: T('Changer mon PIN', 'Change my PIN') }[mode];
+      const invite = inviteCode ? `<div class="info">${T('Tu as reçu une invitation 🎉 Crée ton compte (ou connecte-toi), et tu rejoindras le groupe juste après.', 'You got an invite 🎉 Create your account (or log in), then you’ll join the group right after.')}</div>` : '';
 
       $app.innerHTML = `
         <div class="auth">
-          <form class="auth-box" id="authForm" autocomplete="off">
+          <form class="auth-box" id="authForm" autocomplete="on">
             ${langSwitch('auth-lang')}
             <span class="logo-emoji">🤔</span>
-            <h1 class="logo">${T('Qui de nous ?', 'Which of us?')}</h1>
+            <h1 class="logo">Qui de nous ?</h1>
             <p class="tagline">${T('Une question toutes les 3 h. Tout le monde vote. Verdicts sans pitié.', 'A question every 3 hours. Everyone votes. No mercy.')}</p>
-            <div class="seg seg-3">
-              <button type="button" data-mode="join" class="${mode === 'join' ? 'on' : ''}">${T('Rejoindre', 'Join')}</button>
-              <button type="button" data-mode="login" class="${mode === 'login' ? 'on' : ''}">${T('Connexion', 'Log in')}</button>
-              <button type="button" data-mode="create" class="${mode === 'create' ? 'on' : ''}">${T('Créer', 'Create')}</button>
-            </div>
+            ${mode === 'signup' || mode === 'login' ? `
+              <div class="seg">
+                <button type="button" data-mode="signup" class="${mode === 'signup' ? 'on' : ''}">${T('Créer un compte', 'Sign up')}</button>
+                <button type="button" data-mode="login" class="${mode === 'login' ? 'on' : ''}">${T('Connexion', 'Log in')}</button>
+              </div>` : `<button type="button" class="back" data-mode="login">← ${T('Retour', 'Back')}</button>`}
+            ${invite}
             ${fields}
-            ${hideBtn ? '' : `<button class="btn btn-main btn-block" type="submit">${label}</button>`}
+            <button class="btn btn-main btn-block" type="submit">${label}</button>
             <p class="error" id="authErr">${esc(err)}</p>
+            ${mode === 'login' ? `
+              <div class="auth-links">
+                <button type="button" class="link-btn" data-mode="recover">${T('PIN oublié ?', 'Forgot your PIN?')}</button>
+                <button type="button" class="link-btn" data-mode="legacy">${T('Compte d’avant la mise à jour (code + pseudo)', 'Account from before the update (code + name)')}</button>
+              </div>` : ''}
           </form>
         </div>`;
 
-      $app.querySelectorAll('[data-mode]').forEach((b) => (b.onclick = () => { mode = b.dataset.mode; roster = null; picked = null; err = ''; draw(); }));
+      $app.querySelectorAll('[data-mode]').forEach((b) => (b.onclick = () => { mode = b.dataset.mode; err = ''; draw(); }));
       bindLangSwitch($app, draw);
-      $app.querySelectorAll('[data-pick]').forEach((b) => (b.onclick = () => { picked = roster.players.find((p) => p.id === b.dataset.pick); draw(); }));
-      const other = document.getElementById('otherCode');
-      if (other) other.onclick = () => { roster = null; picked = null; draw(); };
-      const ph = document.getElementById('authPhoto');
-      if (ph) ph.onclick = async () => { const d = await pickPhoto(); if (d) { photoData = d; draw(); } };
 
       const form = document.getElementById('authForm');
       form.onsubmit = async (e) => {
         e.preventDefault();
         const btn = form.querySelector('[type=submit]');
-        if (btn) btn.disabled = true;
+        btn.disabled = true;
         const val = (id) => (document.getElementById(id) || {}).value || '';
         try {
           let data;
-          if (mode === 'create') {
-            data = await api('POST', 'groups', { groupName: val('groupName'), name: val('name'), pin: val('pin'), lang: LANG });
-            save('code', data.code);
-            save('lastName', val('name'));
-          } else if (mode === 'login') {
+          if (mode === 'signup') data = await api('POST', 'accounts', { username: val('username'), pin: val('pin'), lang: LANG });
+          else if (mode === 'login') data = await api('POST', 'login', { username: val('username'), pin: val('pin') });
+          else if (mode === 'legacy') {
             data = await api('POST', 'login', { code: val('code'), name: val('name'), pin: val('pin') });
             save('code', val('code').toUpperCase().trim());
             save('lastName', val('name'));
-          } else if (!roster) {
-            roster = await api('POST', 'roster', { code: val('code') });
-            save('code', roster.group.code);
-            err = '';
-            return draw();
-          } else {
-            data = await api('POST', 'join', { code: roster.group.code, playerId: picked.id, name: val('name'), pin: val('pin'), lang: LANG });
-            save('lastName', val('name'));
-          }
+          } else data = await api('POST', 'account/recover', { username: val('username'), code: val('rcode'), pin: val('pin') });
+          if (val('username')) save('username', val('username').trim());
           token = data.token;
           save('token', token);
           save('joined', '1');
-          if (mode === 'create') { tab = 'me'; save('tab', tab); }
-          if (photoData) await api('POST', 'me/photo', { data: photoData }).catch((e2) => toast(e2.message));
-          await refresh();
-          confetti();
-          if (mode === 'create') showInvite(true);
+          if (mode === 'recover') toast(T('PIN changé 👍', 'PIN changed 👍'));
+          await startAccount();
         } catch (ex) {
           err = ex.message;
           const box = document.getElementById('authErr');
           if (box) box.textContent = ex.message;
-          if (btn) btn.disabled = false;
+          btn.disabled = false;
         }
       };
     };
     draw();
-    // Lien d'invitation (?code=XXXX) : on passe directement au choix du nom.
-    if (mode === 'join' && inviteCode) {
-      inviteCode = null;
-      document.getElementById('authForm').requestSubmit();
+  }
+
+  // Comptes d'avant la mise à jour : on choisit un identifiant une fois (on garde son PIN).
+  function renderUsernameSetup(err = '') {
+    $app.innerHTML = `
+      <div class="auth">
+        <form class="auth-box" id="userForm" autocomplete="on">
+          <span class="logo-emoji">✨</span>
+          <h1 class="logo" style="font-size:1.6rem">${T('Nouveau : un compte pour tous tes groupes', 'New: one account for all your groups')}</h1>
+          <p class="tagline">${T('Choisis un identifiant. Tu te connecteras avec lui et ton PIN actuel, et tu pourras être dans plusieurs groupes. Tes groupes, votes et messages ne bougent pas.', 'Pick a username. You’ll log in with it and your current PIN, and you can be in several groups. Your groups, votes and messages stay as they are.')}</p>
+          <label for="username">${T('Identifiant', 'Username')}</label>
+          <input class="input" id="username" required maxlength="20" autocapitalize="none" autocomplete="username" spellcheck="false" placeholder="${T('Ex : nico_c', 'e.g. nico_c')}">
+          <p class="field-hint">${T('3 à 20 caractères : lettres, chiffres, . _ -', '3 to 20 characters: letters, numbers, . _ -')}</p>
+          <button class="btn btn-main btn-block" type="submit">${T('C’est parti', 'Let’s go')}</button>
+          <p class="error" id="userErr">${esc(err)}</p>
+        </form>
+      </div>`;
+    const form = document.getElementById('userForm');
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      const btn = form.querySelector('[type=submit]');
+      btn.disabled = true;
+      try {
+        const username = document.getElementById('username').value.trim();
+        account = await api('PATCH', 'account', { username });
+        save('username', username);
+        await startAccount();
+      } catch (ex) {
+        document.getElementById('userErr').textContent = ex.message;
+        btn.disabled = false;
+      }
+    };
+  }
+
+  // ---------- Accueil : la liste de mes groupes ----------
+
+  let lobbyTimer = null;
+  const vapid = () => (state && state.vapidKey) || (account && account.vapidKey) || null;
+
+  async function loadAccount() {
+    try {
+      const t0 = Date.now();
+      const a = await api('GET', 'account');
+      skew = a.now - Math.round((t0 + Date.now()) / 2);
+      account = a;
+      // Langue de l'app gardée aussi sur le serveur : les notifications arrivent dans la bonne langue.
+      if (a.account.username && a.account.lang !== LANG) api('PATCH', 'account', { lang: LANG }).then((x) => { account = x; }).catch(() => {});
+      return true;
+    } catch (e) {
+      if (token) toast(e.message);
+      return false;
     }
+  }
+
+  // Après connexion (ou au démarrage) : identifiant à choisir, groupe à ouvrir (notification), invitation, ou accueil.
+  async function startAccount() {
+    $app.innerHTML = '<div class="auth"><span class="logo-emoji">🤔</span></div>';
+    if (!(await loadAccount())) {
+      if (token) renderAuth('login', T('Impossible de charger. Réessaie.', 'Couldn’t load. Try again.'));
+      return;
+    }
+    if (!account.account.username) return renderUsernameSetup();
+    syncPush();
+    const wanted = pendingGroup && account.groups.find((x) => x.id === pendingGroup);
+    pendingGroup = null;
+    if (wanted) return enterGroup(wanted.id);
+    renderLobby();
+    if (inviteCode) {
+      const c = inviteCode;
+      inviteCode = null;
+      const already = account.groups.find((x) => x.code === c.toUpperCase());
+      if (already) enterGroup(already.id);
+      else openJoinSheet(c);
+    }
+  }
+
+  function startLobbyPolling() {
+    if (lobbyTimer) return;
+    lobbyTimer = setInterval(async () => {
+      if (document.hidden || state || !token || !document.getElementById('lobby')) return;
+      if (await loadAccount()) if (!state && document.getElementById('lobby') && $sheet.hidden) renderLobby();
+    }, 30000);
+  }
+  function stopLobbyPolling() {
+    clearInterval(lobbyTimer);
+    lobbyTimer = null;
+  }
+
+  function renderLobby() {
+    stopLive();
+    stopPolling();
+    state = null;
+    groupId = null;
+    startLobbyPolling();
+    const groups = account.groups;
+    const total = groups.reduce((n, g) => n + g.todo + g.unread, 0);
+    document.title = total ? `(${total}) Qui de nous ?` : 'Qui de nous ?';
+    if (navigator.setAppBadge) navigator.setAppBadge(total).catch(() => {});
+
+    const card = (g) => `
+      <button class="group-card ${g.todo || g.unread ? 'busy' : ''}" data-group="${g.id}">
+        ${g.me ? avatar(g.me) : '<span class="avatar"></span>'}
+        <span class="gc-main">
+          <span class="gc-name">${esc(g.name)}</span>
+          <span class="gc-meta">${T('toi : ', 'you: ')}<b>${esc(g.me ? g.me.name : '?')}</b> · ${plural(g.members, T('membre', 'member'))}${g.isAdmin ? ' · admin' : ''}</span>
+        </span>
+        <span class="gc-badges">
+          ${g.todo ? `<span class="gb vote" title="${T('À voter', 'To vote')}">${icon('live')}${g.todo}</span>` : ''}
+          ${g.unread ? `<span class="gb chat" title="${T('Messages non lus', 'Unread messages')}">${icon('chat')}${g.unread}</span>` : ''}
+        </span>
+      </button>`;
+
+    $app.innerHTML = `
+      <header class="top">
+        <h1>Qui de nous ?</h1>
+        <button class="theme-btn" id="themeBtn" role="switch"></button>
+      </header>
+      <main id="lobby" class="lobby">
+        <p class="lobby-hello">${T('Salut', 'Hi')} <b>${esc(account.account.username)}</b> 👋</p>
+        <div class="section-title">${T('Tes groupes', 'Your groups')} <span class="count">${groups.length}</span></div>
+        ${groups.length ? `<div class="group-list">${groups.map(card).join('')}</div>` : `
+          <div class="card empty">${T('Tu n’es dans aucun groupe pour l’instant.<br>Rejoins celui de tes potes avec leur code, ou crée le tien.', 'You’re not in any group yet.<br>Join your friends’ group with their code, or create your own.')}</div>`}
+        <div class="row lobby-actions">
+          <button class="btn btn-main" id="joinBtn">${T('Rejoindre un groupe', 'Join a group')}</button>
+          <button class="btn btn-soft" id="createBtn">${T('Créer un groupe', 'Create a group')}</button>
+        </div>
+        <button class="link-btn lobby-link" id="linkBtn">${T('J’ai un autre groupe avec un compte d’avant la mise à jour', 'I have another group with an account from before the update')}</button>
+
+        <div class="card account-card">
+          <div class="card-title">${T('Mon compte', 'My account')}</div>
+          <div class="acc-row"><span class="muted">${T('Identifiant', 'Username')}</span><b>${esc(account.account.username)}</b></div>
+          <div class="acc-row"><span class="muted">${T('Langue', 'Language')}</span>${langSwitch()}</div>
+          <div class="row">
+            <button class="btn btn-soft" id="pinBtn">${T('Changer de PIN', 'Change PIN')}</button>
+            <button class="btn btn-soft" id="logoutBtn">${T('Se déconnecter', 'Log out')}</button>
+          </div>
+        </div>
+      </main>`;
+
+    document.getElementById('themeBtn').onclick = () => setTheme(isDark() ? 'light' : 'dark');
+    paintThemeBtn();
+    $app.querySelectorAll('[data-group]').forEach((b) => (b.onclick = () => enterGroup(b.dataset.group)));
+    document.getElementById('joinBtn').onclick = () => openJoinSheet();
+    document.getElementById('createBtn').onclick = () => openCreateSheet();
+    document.getElementById('linkBtn').onclick = () => openLinkSheet();
+    document.getElementById('pinBtn').onclick = () => openPinSheet();
+    bindLangSwitch($app, renderLobby);
+    action(document.getElementById('logoutBtn'), async () => {
+      try { await api('POST', 'logout'); } catch { /* déjà déconnecté */ }
+      logoutLocal();
+    });
+  }
+
+  // Ouvrir un groupe : on repart d'un état propre (onglet Live).
+  async function enterGroup(id) {
+    stopLobbyPolling();
+    stopLive();
+    stopPolling();
+    closeChat(true);
+    state = null;
+    groupId = id;
+    save('group', id);
+    chats.clear();
+    typing.clear();
+    openPolls.clear();
+    openVoters.clear();
+    editing = null;
+    openSet = null;
+    setDetail = null;
+    statsPlayer = null;
+    archiveSet = '';
+    archiveExtra = null;
+    halfPick = null;
+    tab = 'live';
+    liveMode = 'live';
+    save('tab', tab);
+    save('liveMode', liveMode);
+    pushSynced = false;
+    $app.innerHTML = '<div class="auth"><span class="logo-emoji">🤔</span></div>';
+    await refresh();
+    if (!state && groupId === id) leaveGroup(); // groupe introuvable : retour à l'accueil
+    else syncGuard();
+  }
+
+  // Retour à l'accueil (bouton ← en haut, ou retour depuis l'onglet Live).
+  function leaveGroup() {
+    if (chatOpen) closeChat(true);
+    stopLive();
+    stopPolling();
+    stopPresence();
+    const wasGuarded = !!(history.state && history.state.guard);
+    state = null;
+    groupId = null;
+    if (!$sheet.hidden) closeSheet();
+    if (wasGuarded) {
+      popIgnore = true;
+      history.back();
+    }
+    if (account) renderLobby();
+    loadAccount().then((ok) => { if (ok && !state && token) renderLobby(); });
+  }
+
+  // Rejoindre un groupe : code → choisir son nom dans la liste → (pseudo, photo) → c'est parti.
+  function openJoinSheet(code = '') {
+    let roster = null;
+    let picked = null;
+    let photoData = null;
+    const draw = () => {
+      openSheet(`
+        <div class="sheet-head"><h2>${T('Rejoindre un groupe', 'Join a group')}</h2><button class="x" data-close>✕</button></div>
+        ${!roster ? `
+          <label for="jcode">${T('Code du groupe', 'Group code')}</label>
+          <input class="input code-input" id="jcode" autocapitalize="characters" autocomplete="off" maxlength="12" placeholder="${T('Demande-le à tes potes', 'Ask your friends for it')}" value="${esc(code)}">
+          <button class="btn btn-main btn-block" id="jNext">${T('Continuer →', 'Continue →')}</button>` : `
+          <div class="info">${T('Groupe', 'Group')} <b>${esc(roster.group.name)}</b> · <button type="button" class="link" id="jOther">${T('changer de code', 'use another code')}</button></div>
+          <label>${T('Qui es-tu ?', 'Who are you?')}</label>
+          ${roster.players.length ? `<div class="pick-grid">${roster.players.map((p) => `
+            <button type="button" class="choice ${picked && picked.id === p.id ? 'picked' : ''}" data-pick="${p.id}">${avatar(p)}<span>${esc(p.name)}</span></button>`).join('')}</div>`
+            : `<div class="info">${T('Tout le monde a déjà rejoint. Demande à l’admin d’ajouter ton nom.', 'Everyone already joined. Ask the admin to add your name.')}</div>`}
+          ${picked ? `
+            <label for="jname">${T('Ton pseudo dans ce groupe (tu peux le changer)', 'Your name in this group (you can change it)')}</label>
+            <input class="input" id="jname" maxlength="24" value="${esc(picked.name)}">
+            <label>${T('Ta photo dans ce groupe', 'Your photo in this group')} <span class="muted">${T('(optionnel)', '(optional)')}</span></label>
+            <button type="button" class="photo-pick" id="jPhoto">
+              ${photoData ? `<span class="avatar lg has-photo" style="--pc:${esc(picked.color)}"><img src="${photoData}" alt=""></span>` : avatar({ ...picked, photo: null }, 'lg')}
+              <span>${photoData ? T('Changer la photo', 'Change photo') : T('Choisir une photo', 'Pick a photo')}<small class="muted">${T('Sinon, tu gardes cet animal', 'Or just keep this animal')}</small></span>
+            </button>
+            <button class="btn btn-main btn-block" id="jGo">${T('C’est parti', 'Let’s go')}</button>` : ''}`}`, (root) => {
+        const next = root.querySelector('#jNext');
+        if (next) {
+          const input = root.querySelector('#jcode');
+          input.onkeydown = (e) => { if (e.key === 'Enter') next.click(); };
+          action(next, async () => {
+            roster = await api('POST', 'roster', { code: input.value });
+            code = roster.group.code;
+            const mine = account.groups.find((x) => x.code === code);
+            if (mine) { closeSheet(); return enterGroup(mine.id); }
+            draw();
+          });
+          if (!code) setTimeout(() => input.focus(), 50);
+        }
+        const other = root.querySelector('#jOther');
+        if (other) other.onclick = () => { roster = null; picked = null; draw(); };
+        root.querySelectorAll('[data-pick]').forEach((b) => (b.onclick = () => { picked = roster.players.find((p) => p.id === b.dataset.pick); draw(); }));
+        const ph = root.querySelector('#jPhoto');
+        if (ph) ph.onclick = async () => { const d = await pickPhoto(); if (d) photoData = d; draw(); };
+        action(root.querySelector('#jGo'), async () => {
+          const r = await api('POST', 'groups/join', { code, playerId: picked.id, name: root.querySelector('#jname').value });
+          closeSheet();
+          await enterGroup(r.groupId);
+          if (photoData && state) await api('POST', 'me/photo', { data: photoData }).then(refresh).catch((e2) => toast(e2.message));
+          confetti();
+        });
+      });
+    };
+    draw();
+    if (code) setTimeout(() => document.getElementById('jNext')?.click(), 0);
+  }
+
+  // Créer un groupe : on en devient l'admin.
+  function openCreateSheet() {
+    let photoData = null;
+    let groupName = '';
+    let name = account.account.username;
+    const draw = () => openSheet(`
+      <div class="sheet-head"><h2>${T('Créer un groupe', 'Create a group')}</h2><button class="x" data-close>✕</button></div>
+      <div class="info">${T('👑 Tu seras l’admin : tu ajouteras ensuite les noms de tes potes, et tu auras un code à leur envoyer.', '👑 You’ll be the admin. Next, you’ll add your friends’ names and get a code to send them.')}</div>
+      <label for="cgroup">${T('Nom du groupe', 'Group name')}</label>
+      <input class="input" id="cgroup" maxlength="40" placeholder="${T('Ex : Les Bouffons', 'e.g. The Clowns')}" value="${esc(groupName)}">
+      <label for="cname">${T('Ton pseudo dans ce groupe', 'Your name in this group')}</label>
+      <input class="input" id="cname" maxlength="24" value="${esc(name)}">
+      <label>${T('Ta photo dans ce groupe', 'Your photo in this group')} <span class="muted">${T('(optionnel)', '(optional)')}</span></label>
+      <button type="button" class="photo-pick" id="cPhoto">
+        ${photoData ? `<span class="avatar lg has-photo" style="--pc:#7b2ff7"><img src="${photoData}" alt=""></span>` : avatar({ id: 'me', color: '#7b2ff7', animal: 0, name: '' }, 'lg')}
+        <span>${photoData ? T('Changer la photo', 'Change photo') : T('Choisir une photo', 'Pick a photo')}<small class="muted">${T('Sinon, tu auras un animal', 'Or you’ll get an animal')}</small></span>
+      </button>
+      <button class="btn btn-main btn-block" id="cGo">${T('Créer le groupe', 'Create the group')}</button>`, (root) => {
+      const keep = () => { groupName = root.querySelector('#cgroup').value; name = root.querySelector('#cname').value; };
+      root.querySelector('#cPhoto').onclick = async () => { keep(); const d = await pickPhoto(); if (d) photoData = d; draw(); };
+      action(root.querySelector('#cGo'), async () => {
+        keep();
+        const r = await api('POST', 'groups', { groupName, name });
+        closeSheet();
+        await enterGroup(r.groupId);
+        if (!state) return;
+        if (photoData) await api('POST', 'me/photo', { data: photoData }).catch((e2) => toast(e2.message));
+        tab = 'me';
+        save('tab', tab);
+        await refresh();
+        confetti();
+        showInvite(true);
+      });
+    });
+    draw();
+  }
+
+  // Rattacher un groupe où on avait un compte d'avant la mise à jour (code + pseudo + PIN de ce groupe).
+  function openLinkSheet() {
+    openSheet(`
+      <div class="sheet-head"><h2>${T('Rattacher un groupe', 'Add a group')}</h2><button class="x" data-close>✕</button></div>
+      <p class="muted small" style="margin:0 0 10px">${T('Avant, il fallait un compte par groupe. Entre le code de l’autre groupe, ton pseudo et ton PIN de là-bas : il rejoint ton compte, avec tes votes et tes messages.', 'Before, you needed one account per group. Enter the other group’s code, your name and your PIN there: it moves into this account, with your votes and messages.')}</p>
+      <label for="lcode">${T('Code du groupe', 'Group code')}</label>
+      <input class="input code-input" id="lcode" autocapitalize="characters" autocomplete="off" maxlength="12">
+      <label for="lname">${T('Ton pseudo dans ce groupe', 'Your name in that group')}</label>
+      <input class="input" id="lname" maxlength="24">
+      ${pinField(T('Ton PIN dans ce groupe', 'Your PIN in that group'), 'lpin')}
+      <button class="btn btn-main btn-block" id="lGo">${T('Rattacher', 'Add it')}</button>`, (root) => {
+      action(root.querySelector('#lGo'), async () => {
+        const r = await api('POST', 'account/link', { code: root.querySelector('#lcode').value, name: root.querySelector('#lname').value, pin: root.querySelector('#lpin').value });
+        closeSheet();
+        toast(T('Groupe rattaché à ton compte 👍', 'Group added to your account 👍'));
+        await loadAccount();
+        syncPush(true);
+        enterGroup(r.groupId);
+      });
+    });
+  }
+
+  function openPinSheet() {
+    openSheet(`
+      <div class="sheet-head"><h2>${T('Changer de PIN', 'Change PIN')}</h2><button class="x" data-close>✕</button></div>
+      ${pinField(T('PIN actuel', 'Current PIN'), 'oldPin')}
+      ${pinField(T('Nouveau PIN (4 à 6 chiffres)', 'New PIN (4 to 6 digits)'), 'newPin')}
+      <button class="btn btn-main btn-block" id="pGo">${T('Enregistrer', 'Save')}</button>`, (root) => {
+      action(root.querySelector('#pGo'), async () => {
+        account = await api('PATCH', 'account', { oldPin: root.querySelector('#oldPin').value, pin: root.querySelector('#newPin').value });
+        closeSheet();
+        toast(T('PIN changé 👍', 'PIN changed 👍'));
+      });
+    });
   }
 
   // Petit interrupteur FR / EN (écran de connexion et Moi).
@@ -508,7 +817,7 @@
     root.querySelectorAll('[data-lang]').forEach((b) => (b.onclick = () => {
       if (b.dataset.lang === LANG) return;
       setLang(b.dataset.lang);
-      if (token && state) api('PATCH', 'me', { lang: LANG }).then(() => { state.me.lang = LANG; }).catch(() => {});
+      if (token) api('PATCH', 'account', { lang: LANG }).then((a) => { account = a; if (state) state.me.lang = LANG; }).catch(() => {});
       redraw();
     }));
   }
@@ -549,16 +858,20 @@
     });
   }
 
-  function pinField() {
+  function pinField(label = T('PIN secret (4 à 6 chiffres)', 'Secret PIN (4 to 6 digits)'), id = 'pin') {
     return `
-      <label for="pin">${T('PIN secret (4 à 6 chiffres)', 'Secret PIN (4 to 6 digits)')}</label>
-      <input class="input" id="pin" required inputmode="numeric" pattern="\\d{4,6}" maxlength="6" type="password" placeholder="••••">`;
+      <label for="${id}">${label}</label>
+      <input class="input" id="${id}" required inputmode="numeric" pattern="\\d{4,6}" maxlength="6" type="password" placeholder="••••" autocomplete="current-password">`;
   }
 
   function logoutLocal() {
     stopPresence();
+    stopLobbyPolling();
     token = null;
     state = null;
+    account = null;
+    groupId = null;
+    save('group', null);
     stopLive();
     closeChat(true);
     chats.clear();
@@ -620,8 +933,8 @@
       const list = await reg.getNotifications();
       for (const n of list) {
         const tag = n.tag || '';
-        const m = /^(chat|mention|poll|votes)-(.+)$/.exec(tag);
-        if (!m) continue;
+        const m = /^(chat|mention|poll|votes)-(.+?)(?:@(\w+))?$/.exec(tag);
+        if (!m || (m[3] && m[3] !== groupId)) continue;
         const [, kind, id] = m;
         let seen = false;
         if (kind === 'chat' || kind === 'mention') {
@@ -665,6 +978,8 @@
       startPresence();
       refresh();
       if (chatOpen) loadChat(chatOpen, true);
+    } else if (token && account && document.getElementById('lobby')) {
+      loadAccount().then((ok) => { if (ok && !state && document.getElementById('lobby') && $sheet.hidden) renderLobby(); });
     }
   });
 
@@ -678,6 +993,7 @@
     if (!document.getElementById('view')) {
       $app.innerHTML = `
         <header class="top">
+          <button class="lobby-btn" id="lobbyBtn" aria-label="${T('Mes groupes', 'My groups')}">${icon('back')}</button>
           <h1 id="groupTitle"></h1>
           <button class="theme-btn" id="themeBtn" role="switch"></button>
           <button class="me-chip" id="meChip"></button>
@@ -685,6 +1001,7 @@
         <main id="view"></main>
         <nav class="nav"><div class="nav-inner" id="nav"></div></nav>`;
       document.getElementById('meChip').onclick = () => go('me');
+      document.getElementById('lobbyBtn').onclick = () => leaveGroup();
       document.getElementById('themeBtn').onclick = () => setTheme(isDark() ? 'light' : 'dark');
       paintThemeBtn();
     }
@@ -1825,7 +2142,7 @@
     const m = me();
     const iOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
     const standalone = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone;
-    const pushOk = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window && state.vapidKey;
+    const pushOk = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window && vapid();
 
     view.innerHTML = `
       <div class="card" id="profileCard">
@@ -1973,7 +2290,8 @@
             <span class="name">${esc(p.name)}</span>
             <span class="status ${p.claimed ? 'on' : ''}">${p.claimed ? T('a rejoint', 'joined') : T('en attente', 'waiting')}</span>
             <button class="icon-btn" data-rename="${p.id}" title="${T('Renommer', 'Rename')}" aria-label="${T('Renommer', 'Rename')}">${icon('edit')}</button>
-            ${p.claimed && p.id !== state.me.playerId ? `<button class="icon-btn" data-reset="${p.id}" title="${T('Réinitialiser le compte (PIN oublié)', 'Reset the account (forgot PIN)')}" aria-label="${T('Réinitialiser', 'Reset')}">${icon('key')}</button>` : ''}
+            ${p.claimed && p.id !== state.me.playerId ? `<button class="icon-btn" data-recover="${p.id}" title="${T('Code de récupération (PIN oublié)', 'Recovery code (forgot PIN)')}" aria-label="${T('Code de récupération', 'Recovery code')}">${icon('key')}</button>` : ''}
+            ${p.claimed && p.id !== state.me.playerId ? `<button class="icon-btn" data-reset="${p.id}" title="${T('Détacher ce nom de son compte', 'Unlink this name from its account')}" aria-label="${T('Détacher', 'Unlink')}">${icon('trash')}</button>` : ''}
             ${!p.claimed ? `<button class="icon-btn" data-remove="${p.id}" title="${T('Retirer', 'Remove')}" aria-label="${T('Retirer', 'Remove')}">${icon('trash')}</button>` : ''}
           </div>`).join('')}
         </div>
@@ -2048,10 +2366,22 @@
     }));
     view.querySelectorAll('[data-reset]').forEach((b) => action(b, async () => {
       const p = player(b.dataset.reset);
-      if (!confirm(T(`Réinitialiser le compte de ${p.name} ? Iel devra rejoindre à nouveau avec un nouveau PIN (ses votes sont gardés).`, `Reset ${p.name}’s account? They’ll have to join again with a new PIN (their votes are kept).`))) return;
+      if (!confirm(T(`Détacher « ${p.name} » de son compte ? Ce nom redevient libre dans le groupe (ses votes restent) : quelqu’un pourra le reprendre en rejoignant. Pour un PIN oublié, utilise plutôt la clé 🔑.`, `Unlink “${p.name}” from their account? The name becomes free in the group again (their votes stay) and someone can take it when joining. For a forgotten PIN, use the 🔑 key instead.`))) return;
       await api('POST', `admin/players/${p.id}/reset`);
-      toast(T('Compte réinitialisé', 'Account reset'));
+      toast(T('Nom détaché', 'Name unlinked'));
       await refresh();
+    }));
+    view.querySelectorAll('[data-recover]').forEach((b) => action(b, async () => {
+      const p = player(b.dataset.recover);
+      if (!confirm(T(`Créer un code de récupération pour ${p.name} ? Avec ce code et son identifiant, iel pourra choisir un nouveau PIN (valable 48 h).`, `Make a recovery code for ${p.name}? With it and their username, they can pick a new PIN (valid for 48 h).`))) return;
+      const r = await api('POST', `admin/players/${p.id}/recovery`);
+      openSheet(`
+        <div class="sheet-head"><h2>${T('Code de récupération', 'Recovery code')}</h2><button class="x" data-close>✕</button></div>
+        <p class="muted" style="margin:0 0 6px">${T(`Donne ce code à <b>${esc(p.name)}</b>. Sur l’écran de connexion : « PIN oublié ? », son identifiant${r.username ? ` (<b>${esc(r.username)}</b>)` : ''}, ce code, puis un nouveau PIN. Il marche une fois, pendant 48 h.`, `Give this code to <b>${esc(p.name)}</b>. On the login screen: “Forgot your PIN?”, their username${r.username ? ` (<b>${esc(r.username)}</b>)` : ''}, this code, then a new PIN. It works once, for 48 h.`)}</p>
+        <div class="big-code">${esc(r.code)}</div>
+        <button class="btn btn-soft btn-block" id="copyRec">${T('Copier le code', 'Copy code')}</button>`, (root) => {
+        root.querySelector('#copyRec').onclick = () => navigator.clipboard.writeText(r.code).then(() => toast(T('Code copié', 'Code copied'))).catch(() => prompt(T('Copie ça :', 'Copy this:'), r.code));
+      });
     }));
     view.querySelectorAll('[data-remove]').forEach((b) => action(b, async () => {
       const p = player(b.dataset.remove);
@@ -2144,7 +2474,7 @@
     liveCtrl = ctrl;
     (async () => {
       try {
-        const res = await fetch('/api/events', { headers: { Authorization: 'Bearer ' + token }, signal: ctrl.signal });
+        const res = await fetch('/api/events', { headers: { Authorization: 'Bearer ' + token, 'X-Group': groupId || '' }, signal: ctrl.signal });
         if (!res.ok || !res.body) throw new Error('live');
         if (chatOpen) loadChat(chatOpen, true); // rattrape ce qui a pu être manqué
         const reader = res.body.getReader();
@@ -2417,7 +2747,7 @@
   // le retour ferme d'abord ce qui est par-dessus (photo en grand, fenêtre, chat), puis revient à l'onglet Live,
   // et seulement là il quitte l'app.
   let popIgnore = false;
-  const atRoot = () => !chatOpen && !viewerOpen() && $sheet.hidden && tab === 'live' && liveMode === 'live' && !openSet && !openPolls.size && !halfPick;
+  const atRoot = () => !state;
 
   function syncGuard() {
     if (!state) return;
@@ -2441,7 +2771,7 @@
     else if (openPolls.size || editing) { openPolls.clear(); editing = null; renderView(); }
     else if (tab === 'live' && liveMode === 'archive') { liveMode = 'live'; save('liveMode', liveMode); renderView(); window.scrollTo({ top: 0 }); }
     else if (tab !== 'live') go('live');
-    else return false;
+    else leaveGroup();
     return true;
   }
 
@@ -3159,8 +3489,14 @@
   // Clic sur une notification alors que l'app est déjà ouverte.
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.addEventListener('message', (e) => {
-      const ch = e.data && e.data.type === 'open' && new URL(e.data.url, location.origin).searchParams.get('chat');
-      if (ch && state) openChat(ch);
+      if (!e.data || e.data.type !== 'open' || !token) return;
+      const u = new URL(e.data.url, location.origin);
+      const ch = u.searchParams.get('chat');
+      const gid = u.searchParams.get('g');
+      if (gid && gid !== groupId) {
+        pendingChat = ch;
+        enterGroup(gid);
+      } else if (ch && state) openChat(ch);
     });
   }
 
@@ -3178,7 +3514,7 @@
       const k = sub.options && sub.options.applicationServerKey;
       if (!k) return true;
       const a = new Uint8Array(k);
-      const b = b64ToBytes(state.vapidKey);
+      const b = b64ToBytes(vapid());
       return a.length === b.length && a.every((x, i) => x === b[i]);
     } catch {
       return true;
@@ -3188,13 +3524,13 @@
   // (Ré)abonne cet appareil et le déclare au serveur.
   async function subscribePush() {
     const reg = swReg || (await swReady);
-    if (!reg || !state.vapidKey) throw new Error(T('Ce navigateur ne gère pas les notifications', 'This browser doesn’t support notifications'));
+    if (!reg || !vapid()) throw new Error(T('Ce navigateur ne gère pas les notifications', 'This browser doesn’t support notifications'));
     let sub = await reg.pushManager.getSubscription();
     if (sub && !sameKey(sub)) {
       await sub.unsubscribe().catch(() => {});
       sub = null;
     }
-    if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(state.vapidKey) });
+    if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(vapid()) });
     await api('POST', 'push/subscribe', { subscription: sub.toJSON() });
     return sub;
   }
@@ -3202,11 +3538,11 @@
   // À chaque ouverture : si les notifs sont autorisées, on resynchronise l'abonnement avec le serveur
   // (un abonnement peut expirer ou changer sans prévenir, surtout sur iPhone).
   let pushSynced = false;
-  async function syncPush() {
-    if (pushSynced) return;
+  async function syncPush(force) {
+    if (pushSynced && !force) return;
     pushSynced = true;
     try {
-      if (!state.vapidKey || !('Notification' in window) || Notification.permission !== 'granted' || load('pushOff')) return;
+      if (!vapid() || !('Notification' in window) || Notification.permission !== 'granted' || load('pushOff')) return;
       await subscribePush();
     } catch (e) {
       console.warn('Synchro des notifs :', e);
@@ -3286,11 +3622,11 @@
 
   let presenceTimer = null;
   function sendPresence(visible) {
-    if (!token) return;
+    if (!token || !groupId) return;
     fetch('/api/presence', {
       method: 'POST',
       keepalive: true,
-      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token, 'X-Group': groupId },
       body: JSON.stringify({ visible }),
     }).catch(() => {});
   }
@@ -3313,12 +3649,7 @@
   // ---------- Démarrage ----------
 
   if (inviteCode) save('code', inviteCode.toUpperCase());
-  if (inviteCode || pendingChat) history.replaceState(null, '', BASE);
-  if (token) {
-    inviteCode = null;
-    $app.innerHTML = '<div class="auth"><span class="logo-emoji">🤔</span></div>';
-    refresh().then(() => { if (!state && token) renderAuth('login', T('Impossible de charger. Réessaie.', 'Couldn’t load. Try again.')); });
-  } else {
-    renderAuth(inviteCode ? 'join' : null);
-  }
+  if (inviteCode || pendingChat || pendingGroup) history.replaceState(null, '', BASE);
+  if (token) startAccount();
+  else renderAuth(inviteCode ? 'signup' : null);
 })();
