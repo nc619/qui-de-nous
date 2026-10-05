@@ -1,4 +1,4 @@
-// Service worker : notifications push + installation sur l'écran d'accueil. (v4)
+// Service worker : notifications push + installation sur l'écran d'accueil. (v5)
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
 
@@ -23,9 +23,14 @@ self.addEventListener('push', (event) => {
   }
   // iPhone et Android exigent qu'une notification s'affiche pour chaque push reçu :
   // si les options avancées posent problème, on retombe sur une notification minimale.
-  event.waitUntil(
-    self.registration.showNotification(title, options).catch(() => self.registration.showNotification(title, { body: options.body }))
-  );
+  // Pastille sur l'icône de l'app : le serveur envoie le nombre de choses à voir pour cette personne.
+  const badge = typeof data.badge === 'number' && self.navigator.setAppBadge
+    ? self.navigator.setAppBadge(data.badge).catch(() => {})
+    : Promise.resolve();
+  event.waitUntil(Promise.all([
+    self.registration.showNotification(title, options).catch(() => self.registration.showNotification(title, { body: options.body })),
+    badge,
+  ]));
 });
 
 self.addEventListener('notificationclick', (event) => {
