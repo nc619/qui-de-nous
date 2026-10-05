@@ -612,7 +612,7 @@
               const key = `${p.id}:${id}`;
               const open = openVoters.has(key);
               return `
-                <div class="result ${p.myVote === id ? 'mine' : ''} ${c === max ? 'winner' : ''}">
+                <div class="result ${p.myVote === id ? 'mine' : ''} ${c === max ? 'winner' : ''}" style="--pc:${esc(u.color)}">
                   <button class="r-row" data-voters="${esc(key)}" aria-expanded="${open}">
                     ${avatar(u, 'sm')}
                     <span class="r-track">
@@ -670,9 +670,11 @@
     // Sous la question : une barre pour le gagnant (deux si égalité), longueur = sa part des votes,
     // avec au bout les photos de ceux qui ont voté pour lui. Le reste se voit en dépliant.
     const bars = leaders.slice(0, 2).map((u) => `
-      <span class="mini-res">
+      <span class="mini-res" style="--pc:${esc(u.color)}">
         ${avatar(u, 'xs')}
-        <span class="mini-track"><span class="mini-fill" style="width:${((max / total) * 100).toFixed(1)}%">${voterStack(votersFor(p, u.id), 3)}</span></span>
+        <span class="mr-name">${esc(u.id === state.me.playerId ? 'Toi' : u.name)}</span>
+        <span class="mini-track"><span class="mini-fill" style="width:${((max / total) * 100).toFixed(1)}%"></span></span>
+        <span class="mr-n">${max}</span>
       </span>`).join('') + (leaders.length > 2 ? `<span class="tie-more">+${leaders.length - 2} ex æquo</span>` : '');
     return `
       <button class="prow ${p.custom ? 'custom' : ''} ${flashId === p.id ? 'flash' : ''}" data-toggle="${p.id}" aria-expanded="false">
@@ -724,7 +726,7 @@
     const lines = c.last.map((m) => {
       const u = player(m.playerId);
       const who = m.playerId === state.me.playerId ? 'Toi' : esc(u.name);
-      return `<span class="pc-msg"><b>${who}</b> ${m.deleted ? '<i>supprimé</i>' : m.kind === 'gif' ? 'GIF' : esc(m.text)}</span>`;
+      return `<span class="pc-msg"><b class="pname" style="--pc:${esc(u.color)}">${who}</b> ${m.deleted ? '<i>supprimé</i>' : m.kind === 'gif' ? 'GIF' : esc(m.text)}</span>`;
     }).join('');
     return `
       <button class="poll-chat" data-chat="${p.id}">
@@ -1623,7 +1625,7 @@
       return `
         <div class="mini-msg ${mine ? 'mine' : ''}">
           ${mine ? '' : avatar(u, 'xs')}
-          <div class="mini-body">${mine ? '' : `<span class="mini-name">${esc(u.name)}</span>`}<span class="mini-bubble">${text}</span></div>
+          <div class="mini-body">${mine ? '' : `<span class="mini-name pname" style="--pc:${esc(u.color)}">${esc(u.name)}</span>`}<span class="mini-bubble">${text}</span></div>
         </div>`;
     }).join('');
 
@@ -1922,7 +1924,7 @@
         <div class="msg ${mine ? 'mine' : ''} ${first ? 'first' : ''} ${last ? 'last' : ''} ${sel ? 'sel' : ''}">
           ${mine ? '' : last ? avatar(u, 'sm') : '<span class="avatar-space"></span>'}
           <div class="msg-body">
-            ${!mine && first ? `<div class="msg-name">${esc(u.name)}</div>` : ''}
+            ${!mine && first ? `<div class="msg-name pname" style="--pc:${esc(u.color)}">${esc(u.name)}</div>` : ''}
             <div class="bubble ${m.kind === 'gif' && !m.deleted ? 'gif' : ''} ${m.deleted ? 'deleted' : ''}" ${m.deleted ? '' : `data-msg="${m.id}"`}>${content}</div>
             ${reacts.length ? `<button class="reacts" data-msg="${m.id}">${reacts.map((r) => `<span class="${r.players.includes(myPid) ? 'me' : ''}">${r.emoji}${r.players.length > 1 ? `<i>${r.players.length}</i>` : ''}</span>`).join('')}</button>` : ''}
             ${last && !sel ? `<div class="msg-time">${hhmm(m.at)}</div>` : ''}

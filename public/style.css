@@ -1818,3 +1818,41 @@ main { padding-top: 10px; }
 [data-theme="dark"] .mini-fill { background: linear-gradient(90deg, #7b2ff74d, #f107a340); }
 .prow-side { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 .tie-more { font-size: 0.72rem; color: var(--muted); padding-left: 28px; }
+
+/* =====================================================================
+   v9 : lignes repliées lisibles (photo + prénom + fine barre colorée),
+   barres dépliées et prénoms du chat dans la couleur de chacun
+   ===================================================================== */
+
+/* Couleur de texte lisible à partir de la couleur de la personne */
+.pname { color: color-mix(in srgb, var(--pc) 78%, #000); }
+[data-theme="dark"] .pname { color: color-mix(in srgb, var(--pc) 70%, #fff); }
+.msg-name.pname, .mini-name.pname { font-weight: 700; }
+
+.prow-res { padding-left: 38px; gap: 12px; }
+.mini-bars { gap: 5px; }
+.mini-res { gap: 7px; }
+.mini-res > .avatar.xs { width: 20px; height: 20px; }
+.mr-name {
+  flex: 0 1 auto;
+  max-width: 40%;
+  font-size: 0.82rem;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: color-mix(in srgb, var(--pc) 78%, #000);
+}
+[data-theme="dark"] .mr-name { color: color-mix(in srgb, var(--pc) 70%, #fff); }
+.mini-track { flex: 1; min-width: 24px; height: 6px; border-radius: 3px; background: var(--soft); overflow: hidden; display: block; }
+.mini-fill { display: block; height: 100%; min-width: 0; padding: 0; border-radius: 3px; background: var(--pc) !important; }
+.mr-n { font-size: 0.78rem; font-weight: 700; color: var(--muted); font-variant-numeric: tabular-nums; flex-shrink: 0; }
+.tie-more { padding-left: 27px; }
+
+/* Barres dépliées : teinte de la couleur de la personne (plus soutenue pour le gagnant) */
+.result .r-fill { background: color-mix(in srgb, var(--pc) 16%, var(--card)); }
+.result.winner .r-fill { background: color-mix(in srgb, var(--pc) 34%, var(--card)); }
+[data-theme="dark"] .result .r-fill { background: color-mix(in srgb, var(--pc) 22%, var(--card)); }
+[data-theme="dark"] .result.winner .r-fill { background: color-mix(in srgb, var(--pc) 45%, var(--card)); }
+.result.mine .r-fill { box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--pc) 80%, #000); }
+.r-fill .stack .avatar.xs, .result.winner .r-fill .stack .avatar.xs { box-shadow: 0 0 0 1.5px var(--card); }
