@@ -1946,3 +1946,16 @@ main { padding-top: 10px; }
 .vote-list.cols3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .poll.todo .vote-list.cols3 .vote-opt { padding: 5px 6px 5px 4px; gap: 5px; font-size: 0.82rem; }
 .poll.todo .vote-list.cols3 .vote-opt .avatar { width: 22px; height: 22px; }
+
+/* =====================================================================
+   v12 : carte à voter entre les deux (2 colonnes, taille moyenne) ;
+   lignes repliées sans emoji de catégorie, tout aligné à gauche
+   ===================================================================== */
+.poll.todo .vote-list { gap: 7px; }
+.poll.todo .vote-opt { padding: 7px 10px 7px 6px; font-size: 0.92rem; border-radius: 12px; gap: 8px; }
+.poll.todo .vote-opt .avatar { width: 28px; height: 28px; }
+.poll.todo .poll-foot { margin-top: 12px; }
+
+.prow-top { gap: 8px; }
+.prow-q { padding-top: 0; }
+.prow-res { padding-left: 0; }
