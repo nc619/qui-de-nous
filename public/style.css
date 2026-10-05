@@ -1959,3 +1959,22 @@ main { padding-top: 10px; }
 .prow-top { gap: 8px; }
 .prow-q { padding-top: 0; }
 .prow-res { padding-left: 0; }
+
+/* Recadrage de la photo de profil */
+.crop-hint { margin: 0 0 12px; text-align: center; }
+.crop-box {
+  position: relative;
+  margin: 0 auto 14px;
+  overflow: hidden;
+  border-radius: 18px;
+  background: #111;
+  touch-action: none;
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.crop-box:active { cursor: grabbing; }
+.crop-box img { position: absolute; top: 0; left: 0; transform-origin: 0 0; max-width: none; pointer-events: none; }
+.crop-ring { position: absolute; inset: 0; border-radius: 50%; box-shadow: 0 0 0 999px rgba(0, 0, 0, 0.55); border: 2px solid rgba(255, 255, 255, 0.85); pointer-events: none; }
+.crop-zoom { display: flex; align-items: center; gap: 10px; margin: 0 6px 16px; color: var(--muted); font-weight: 700; font-size: 1.2rem; }
+.crop-zoom input { flex: 1; accent-color: var(--accent); }

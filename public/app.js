@@ -144,7 +144,7 @@
     return `<span class="avatar ${size} ${p.photo ? 'has-photo' : ''}" style="--pc:${esc(p.color)}" title="${esc(p.name)}">${inner}</span>`;
   }
 
-  // Photo choisie sur le téléphone → recadrée en carré 256 px (JPEG) avant l'envoi.
+  // Photo choisie sur le téléphone → écran de recadrage (zoom + déplacement) → carré 256 px (JPEG).
   function pickPhoto() {
     return new Promise((resolve) => {
       const input = document.createElement('input');
@@ -155,14 +155,7 @@
         if (!file) return resolve(null);
         const url = URL.createObjectURL(file);
         const img = new Image();
-        img.onload = () => {
-          const side = Math.min(img.naturalWidth, img.naturalHeight);
-          const canvas = document.createElement('canvas');
-          canvas.width = canvas.height = 256;
-          canvas.getContext('2d').drawImage(img, (img.naturalWidth - side) / 2, (img.naturalHeight - side) / 2, side, side, 0, 0, 256, 256);
-          URL.revokeObjectURL(url);
-          resolve(canvas.toDataURL('image/jpeg', 0.85));
-        };
+        img.onload = () => cropPhoto(img).then((data) => { URL.revokeObjectURL(url); resolve(data); });
         img.onerror = () => {
           URL.revokeObjectURL(url);
           toast('Image illisible');
@@ -171,6 +164,108 @@
         img.src = url;
       };
       input.click();
+    });
+  }
+
+  // Recadrage : pincer / molette / curseur pour zoomer, glisser pour placer la photo dans le cercle.
+  function cropPhoto(img) {
+    return new Promise((resolve) => {
+      const W = img.naturalWidth;
+      const H = img.naturalHeight;
+      const V = Math.min(300, window.innerWidth - 72); // taille de la zone de recadrage
+      const base = V / Math.min(W, H); // échelle où la photo couvre juste le cercle
+      const MAX = 5;
+      let zoom = 1;
+      let x = (V - W * base) / 2; // position du coin haut-gauche de la photo dans la zone
+      let y = (V - H * base) / 2;
+      let done = false;
+      const finish = (v) => { if (!done) { done = true; resolve(v); } };
+
+      openSheet(`
+        <div class="sheet-head"><h2>Ta photo</h2><button class="x" data-close>✕</button></div>
+        <p class="muted small crop-hint">Pince ou utilise le curseur pour zoomer, glisse pour placer.</p>
+        <div class="crop-box" id="cropBox" style="width:${V}px;height:${V}px">
+          <img id="cropImg" src="${img.src}" alt="" draggable="false">
+          <div class="crop-ring"></div>
+        </div>
+        <div class="crop-zoom">
+          <span>−</span>
+          <input type="range" id="cropZoom" min="1" max="${MAX}" step="0.01" value="1" aria-label="Zoom">
+          <span>+</span>
+        </div>
+        <button class="btn btn-main btn-block" id="cropOk">Valider</button>`, (root) => {
+        const box = root.querySelector('#cropBox');
+        const el = root.querySelector('#cropImg');
+        const slider = root.querySelector('#cropZoom');
+
+        const clamp = () => {
+          const s = base * zoom;
+          x = Math.min(0, Math.max(V - W * s, x));
+          y = Math.min(0, Math.max(V - H * s, y));
+        };
+        const paint = () => {
+          clamp();
+          el.style.transform = `translate(${x}px, ${y}px) scale(${base * zoom})`;
+          slider.value = zoom;
+        };
+        // Zoom en gardant fixe le point (px, py) de la zone (le centre, ou le milieu des deux doigts).
+        const zoomTo = (z, px = V / 2, py = V / 2) => {
+          z = Math.min(MAX, Math.max(1, z));
+          const s0 = base * zoom;
+          const s1 = base * z;
+          x = px - ((px - x) / s0) * s1;
+          y = py - ((py - y) / s0) * s1;
+          zoom = z;
+          paint();
+        };
+
+        const pts = new Map();
+        let last = null; // { x, y, dist } du geste en cours
+        const local = (e) => { const r = box.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
+        const gesture = () => {
+          const p = [...pts.values()];
+          if (p.length === 1) return { x: p[0][0], y: p[0][1], dist: 0 };
+          return { x: (p[0][0] + p[1][0]) / 2, y: (p[0][1] + p[1][1]) / 2, dist: Math.hypot(p[0][0] - p[1][0], p[0][1] - p[1][1]) };
+        };
+        box.addEventListener('pointerdown', (e) => {
+          try { box.setPointerCapture(e.pointerId); } catch { /* pas grave : on suit quand même le doigt */ }
+          pts.set(e.pointerId, local(e));
+          last = gesture();
+        });
+        box.addEventListener('pointermove', (e) => {
+          if (!pts.has(e.pointerId)) return;
+          pts.set(e.pointerId, local(e));
+          const g = gesture();
+          if (last && pts.size >= 2 && last.dist && g.dist) zoomTo(zoom * (g.dist / last.dist), g.x, g.y);
+          if (last) { x += g.x - last.x; y += g.y - last.y; paint(); }
+          last = g;
+        });
+        const up = (e) => { pts.delete(e.pointerId); last = pts.size ? gesture() : null; };
+        box.addEventListener('pointerup', up);
+        box.addEventListener('pointercancel', up);
+        box.addEventListener('wheel', (e) => {
+          e.preventDefault();
+          const [px, py] = local(e);
+          zoomTo(zoom * Math.exp(-e.deltaY * 0.0015), px, py);
+        }, { passive: false });
+        slider.oninput = () => zoomTo(Number(slider.value));
+
+        root.querySelector('#cropOk').onclick = () => {
+          const s = base * zoom;
+          const canvas = document.createElement('canvas');
+          canvas.width = canvas.height = 256;
+          const ctx = canvas.getContext('2d');
+          ctx.fillStyle = '#fff';
+          ctx.fillRect(0, 0, 256, 256);
+          ctx.drawImage(img, -x / s, -y / s, V / s, V / s, 0, 0, 256, 256);
+          finish(canvas.toDataURL('image/jpeg', 0.85));
+          closeSheet();
+        };
+        // Fermée sans valider (✕, fond, bouton retour) → pas de nouvelle photo.
+        const obs = new MutationObserver(() => { if ($sheet.hidden || !$sheet.contains(box)) { obs.disconnect(); finish(null); } });
+        obs.observe($sheet, { attributes: true, childList: true });
+        paint();
+      });
     });
   }
 
