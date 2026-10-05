@@ -26,6 +26,7 @@
   let swReg = null;
   let inviteCode = new URLSearchParams(location.search).get('code');
   const openPolls = new Set(); // sondages déjà votés / archivés dépliés par l'utilisateur
+  const openVoters = new Set(); // barres de résultats dont on a déroulé la liste des votants ("sondage:personne")
   let animating = false; // animation de vote en cours
   let pendingRender = false;
   let flashId = null; // ligne à faire briller après l'animation
@@ -599,32 +600,37 @@
           </button>` : ''}</div>
         ${editing === p.id ? '<button class="link-btn" data-cancel>Annuler</button>' : ''}`;
     } else {
-      // Résultats : pour chaque personne votée, le nombre de votes et QUI a voté pour elle.
+      // Résultats façon AskUs : la plus grande barre prend toute la largeur, les autres sont à l'échelle.
+      // Au bout de chaque barre, les photos de ceux qui ont voté ; un tap sur la barre déroule leurs noms.
       const counts = Object.entries(p.results || {}).sort((a, b) => b[1] - a[1]);
       const max = counts.length ? counts[0][1] : 0;
-      const votersFor = (id) => (p.ballots || []).filter((b) => b.target === id).map((b) => player(b.voter));
       body = counts.length
         ? `<div class="results">${counts
             .map(([id, c]) => {
               const u = player(id);
-              const pct = total ? Math.round((c / total) * 100) : 0;
-              const voters = votersFor(id);
+              const voters = votersFor(p, id);
+              const key = `${p.id}:${id}`;
+              const open = openVoters.has(key);
               return `
                 <div class="result ${p.myVote === id ? 'mine' : ''} ${c === max ? 'winner' : ''}">
-                  <span class="bar" style="width:${pct}%;background:${esc(u.color)}"></span>
-                  <div class="result-main">
+                  <button class="r-row" data-voters="${esc(key)}" aria-expanded="${open}">
                     ${avatar(u, 'sm')}
-                    <span class="name">${esc(u.name)}</span>
-                    <span class="votes">${c}</span>
-                  </div>
-                  ${voters.length ? `<div class="result-voters">par ${voters.map((v) => esc(v.id === state.me.playerId ? 'toi' : v.name)).join(', ')}</div>` : ''}
+                    <span class="r-track">
+                      <span class="r-fill" style="width:${((c / max) * 100).toFixed(1)}%">
+                        <span class="r-name">${esc(u.id === state.me.playerId ? 'Toi' : u.name)}</span>
+                        ${voterStack(voters, 4)}
+                      </span>
+                    </span>
+                    <span class="r-count">${c}</span>
+                  </button>
+                  ${open ? `<div class="r-list">${voters.map((v) => `<span class="who">${avatar(v, 'xs')}${esc(v.id === state.me.playerId ? 'Toi' : v.name)}</span>`).join('')}</div>` : ''}
                 </div>`;
             })
             .join('')}</div>`
         : '<p class="muted small" style="margin:0">Personne n’a voté.</p>';
     }
 
-    const status = p.ended ? 'Terminé' : `encore ${left(p.endsAt)}`;
+    const status = p.ended ? '<span class="poll-ended">Terminé</span>' : timeLeft(p);
     const author = p.custom && p.authorId ? player(p.authorId) : null;
     const picked = opts.justVoted && p.myVote ? player(p.myVote) : null;
     return `
@@ -640,7 +646,10 @@
         </div>
         ${body}
         <div class="poll-foot">
-          <span>${total}/${state.players.length} ${total > 1 ? 'ont voté' : 'a voté'}${author && by && author.id === by.id ? '' : ` · ${by ? 'lancée par ' + esc(by.name) : 'question du jour'}`}</span>
+          <span class="foot-info">
+            ${voterStack(p.voterIds.map(player), 5)}<span class="vote-count">${total}/${members()}</span>
+            ${by && !(author && author.id === by.id) ? `<span class="by">· par ${esc(by.name)}</span>` : ''}
+          </span>
           <span class="foot-actions">
             ${comments ? '' : `<button class="more-btn" data-chat="${p.id}" aria-label="Commenter">${icon('comment')}</button>`}
             ${hasMenu ? `<button class="more-btn" data-more="${p.id}" aria-label="Options">${icon('more')}</button>` : ''}
@@ -658,33 +667,50 @@
     const author = p.custom && p.authorId ? player(p.authorId) : null;
     const c = p.chat || { count: 0, unread: 0 };
     const total = counts.reduce((n, [, x]) => n + x, 0);
-    const meta = [
-      plural(p.voterIds.length, 'vote'),
-      p.ended ? ago(p.endsAt) : `encore ${left(p.endsAt)}`,
-    ];
-    // Sous la question, sur toute la largeur : le gagnant (avatar, nom, %) puis une barre de répartition des votes,
-    // un segment par personne votée, dans sa couleur (le gagnant en vif, les autres plus pâles).
-    const result = leaders.length
-      ? `<span class="prow-lead">
-          <span class="prow-avs">${leaders.slice(0, 3).map((u) => avatar(u, 'xs')).join('')}</span>
-          <b>${esc(leaders.length === 1 ? leaders[0].name : leaders.length === 2 ? `${leaders[0].name}, ${leaders[1].name}` : `${leaders.length} ex æquo`)}</b>
-          <span class="prow-pct">${Math.round((max / total) * 100)}%</span>
-          <span class="prow-meta">${meta.join(' · ')}</span>
-        </span>
-        <span class="prow-bar">${counts.map(([id, x]) => `<i style="flex:${x};background:${esc(player(id).color)};${x === max ? '' : 'opacity:.35'}"></i>`).join('')}</span>`
-      : `<span class="prow-lead"><span class="muted">Personne n’a voté</span><span class="prow-meta">${meta.join(' · ')}</span></span>`;
+    // Sous la question : une barre pour le gagnant (deux si égalité), longueur = sa part des votes,
+    // avec au bout les photos de ceux qui ont voté pour lui. Le reste se voit en dépliant.
+    const bars = leaders.slice(0, 2).map((u) => `
+      <span class="mini-res">
+        ${avatar(u, 'xs')}
+        <span class="mini-track"><span class="mini-fill" style="width:${((max / total) * 100).toFixed(1)}%">${voterStack(votersFor(p, u.id), 3)}</span></span>
+      </span>`).join('') + (leaders.length > 2 ? `<span class="tie-more">+${leaders.length - 2} ex æquo</span>` : '');
     return `
       <button class="prow ${p.custom ? 'custom' : ''} ${flashId === p.id ? 'flash' : ''}" data-toggle="${p.id}" aria-expanded="false">
         <span class="prow-top">
           <span class="prow-set ${setOf(p.setId).spicy ? 'spicy' : ''}" title="${esc(setOf(p.setId).name)}">${esc(setOf(p.setId).emoji)}</span>
-          <span class="prow-body">
-            <span class="prow-q">${esc(p.text)}</span>
-            ${author ? `<span class="prow-by">${icon('pen')}Question de ${esc(author.name)}</span>` : ''}
-          </span>
+          <span class="prow-q">${author ? `<span class="prow-pen" title="Question de ${esc(author.name)}">${icon('pen')}</span>` : ''}${esc(p.text)}</span>
           ${c.count ? `<span class="prow-chat ${c.unread ? 'new' : ''}">${icon('comment')}${c.unread || c.count}</span>` : ''}
         </span>
-        <span class="prow-res">${result}</span>
+        <span class="prow-res">
+          <span class="mini-bars">${bars || '<span class="muted small">Aucun vote</span>'}</span>
+          <span class="prow-side">${p.ended ? '' : timeLeft(p)}<span class="vote-count">${p.voterIds.length}/${members()}</span></span>
+        </span>
       </button>`;
+  }
+
+  // Membres qui ont rejoint (les noms ajoutés par l'admin mais pas encore réclamés ne comptent pas).
+  const members = () => state.players.filter((u) => u.claimed).length || state.players.length;
+
+  function votersFor(p, id) {
+    return (p.ballots || []).filter((b) => b.target === id).map((b) => player(b.voter));
+  }
+
+  // Petites photos empilées (+N s'il y en a trop).
+  function voterStack(list, max) {
+    if (!list.length) return '';
+    const extra = list.length - max;
+    return `<span class="stack">${list.slice(0, extra > 0 ? max - 1 : max).map((u) => avatar(u, 'xs')).join('')}${extra > 0 ? `<span class="avatar xs more">+${extra + 1}</span>` : ''}</span>`;
+  }
+
+  // Temps restant : une petite horloge qui se vide, et « 5h » / « 40 min ».
+  function timeLeft(p) {
+    const ms = Math.max(0, p.endsAt - now());
+    const frac = Math.min(1, ms / Math.max(1, p.endsAt - p.startsAt));
+    const C = 2 * Math.PI * 6;
+    const m = Math.round(ms / 60000);
+    const label = m >= 60 ? `${Math.floor(m / 60)}h` : `${m} min`;
+    return `<span class="tleft ${frac < 0.15 ? 'soon' : ''}" title="Encore ${left(p.endsAt)}">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6" class="tl-track"/><circle cx="8" cy="8" r="6" class="tl-fill" stroke-dasharray="${C.toFixed(2)}" stroke-dashoffset="${(C * (1 - frac)).toFixed(2)}"/></svg>${label}</span>`;
   }
 
   // Sondage déjà voté / archivé : ligne compacte, ou carte complète si dépliée.
@@ -743,6 +769,12 @@
       if (editing === id) editing = null;
       renderView();
     }));
+    view.querySelectorAll('[data-voters]').forEach((b) => (b.onclick = () => {
+      const k = b.dataset.voters;
+      if (openVoters.has(k)) openVoters.delete(k);
+      else openVoters.add(k);
+      renderView();
+    }));
     view.querySelectorAll('[data-chat]').forEach((b) => (b.onclick = () => openChat(b.dataset.chat)));
     view.querySelectorAll('[data-more]').forEach((b) => (b.onclick = () => openPollMenu(b.dataset.more)));
     view.querySelectorAll('[data-cancel]').forEach((b) => (b.onclick = () => { editing = null; renderView(); }));
@@ -769,7 +801,7 @@
       const tmp = document.createElement('div');
       tmp.innerHTML = pollCard(poll, { justVoted: true, collapsible: !firstVote });
       const fresh = tmp.firstElementChild;
-      const bars = [...fresh.querySelectorAll('.result .bar')];
+      const bars = [...fresh.querySelectorAll('.r-fill')];
       const widths = bars.map((x) => x.style.width);
       bars.forEach((x) => (x.style.width = '0'));
       card.replaceWith(fresh);
