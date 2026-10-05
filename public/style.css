@@ -1978,3 +1978,14 @@ main { padding-top: 10px; }
 .crop-ring { position: absolute; inset: 0; border-radius: 50%; box-shadow: 0 0 0 999px rgba(0, 0, 0, 0.55); border: 2px solid rgba(255, 255, 255, 0.85); pointer-events: none; }
 .crop-zoom { display: flex; align-items: center; gap: 10px; margin: 0 6px 16px; color: var(--muted); font-weight: 700; font-size: 1.2rem; }
 .crop-zoom input { flex: 1; accent-color: var(--accent); }
+
+/* =====================================================================
+   v13 : carte à voter adaptée à la taille du groupe (voir fitVoteCards)
+   ===================================================================== */
+.poll.todo.fit { display: flex; flex-direction: column; }
+.poll.todo.fit .poll-head { flex: 1; display: flex; flex-direction: column; }
+.poll.todo.fit .question { margin-top: auto; margin-bottom: auto; padding: 8px 0 14px; }
+.poll.todo.fit .vote-list { grid-template-columns: repeat(var(--cols), minmax(0, 1fr)); gap: var(--gap); }
+.poll.todo.fit .vote-opt { height: var(--opt-h); padding-top: 0; padding-bottom: 0; font-size: var(--opt-fs); gap: calc(var(--opt-h) * 0.16); border-radius: calc(var(--opt-h) * 0.28); }
+.poll.todo.fit .vote-opt .avatar { width: var(--opt-av); height: var(--opt-av); }
+.poll.todo.fit .vote-opt.nobody .avatar { font-size: calc(var(--opt-av) * 0.5); }

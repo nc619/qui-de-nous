@@ -984,7 +984,56 @@
     if (dt) dt.onclick = () => { doneFolded = !doneFolded; save('doneFolded', doneFolded ? '1' : null); renderView(); };
     const meter = document.getElementById('dropMeter');
     if (meter) meter.onclick = openDropInfo;
+    fitVoteCards();
   }
+
+  // Cartes à voter : même place à l'écran quelle que soit la taille du groupe (~90 % avec la barre du haut
+  // et celle du bas). Petit groupe → une colonne de grands boutons ; grand groupe → 2 ou 3 colonnes plus serrées.
+  function fitVoteCards() {
+    const cards = [...document.querySelectorAll('.poll.todo')];
+    if (!cards.length) return;
+    const nav = document.querySelector('.nav');
+    const navH = nav ? nav.offsetHeight : 0;
+    const first = cards[0];
+    first.classList.remove('fit');
+    first.style.minHeight = '';
+    const top = first.getBoundingClientRect().top + window.scrollY;
+    // Le premier écran : de la carte jusqu'à 90 % de la hauteur, moins la barre du bas.
+    const avail = Math.max(360, window.innerHeight * 0.9 - Math.min(top, 170) - navH);
+    const GAP = 7;
+    for (const card of cards) {
+      const list = card.querySelector('.vote-list');
+      if (!list) continue;
+      card.classList.remove('fit');
+      card.style.minHeight = '';
+      const n = list.children.length;
+      const fixed = card.offsetHeight - list.offsetHeight;
+      const room = avail - fixed;
+      let pick = null;
+      for (const [cols, min, max] of [[1, 46, 78], [2, 38, 64], [3, 34, 50]]) {
+        if (cols === 1 && n > 5) continue;
+        const rows = Math.ceil(n / cols);
+        const h = (room - GAP * (rows - 1)) / rows;
+        if (h >= min || cols === 3) {
+          pick = { cols, h: Math.max(min, Math.min(max, h)) };
+          break;
+        }
+      }
+      const h = pick.h;
+      card.style.setProperty('--cols', pick.cols);
+      card.style.setProperty('--opt-h', `${Math.round(h)}px`);
+      card.style.setProperty('--opt-av', `${Math.round(Math.min(46, Math.max(22, h * 0.62)))}px`);
+      card.style.setProperty('--opt-fs', `${Math.min(17.5, Math.max(13, 10 + h * 0.11)).toFixed(1)}px`);
+      card.style.setProperty('--gap', `${GAP}px`);
+      card.style.minHeight = `${Math.round(avail)}px`;
+      card.classList.add('fit');
+    }
+  }
+  let fitTimer = null;
+  window.addEventListener('resize', () => {
+    clearTimeout(fitTimer);
+    fitTimer = setTimeout(() => { if (state && tab === 'live' && liveMode === 'live') fitVoteCards(); }, 150);
+  });
 
   // Compte à rebours vers la prochaine question auto : un petit anneau qui se remplit.
   function dropMeter() {
