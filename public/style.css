@@ -1918,3 +1918,31 @@ main { padding-top: 10px; }
 .chat-locked b { font-size: 1.15rem; }
 .chat-locked p { margin: 0 0 8px; font-size: 0.9rem; line-height: 1.4; }
 .chat-input.locked { opacity: 0.55; }
+
+/* =====================================================================
+   v11 : flèche à côté du titre, horloge + votes à côté de la barre (une seule colonne
+   de largeur fixe pour tout le monde), cartes à voter plus compactes
+   ===================================================================== */
+
+.fold-title { width: auto; justify-content: flex-start; }
+.fold-title .ico-svg { margin-left: 2px; }
+
+/* Une seule personne en tête : horloge et votes sur la même ligne que la barre.
+   Égalité : empilés. La colonne garde la même largeur → barres identiques partout. */
+.prow-res { grid-template-columns: minmax(0, 1fr) 78px; gap: 8px; }
+.prow-side { width: 78px; flex-direction: row; justify-content: flex-end; gap: 8px; }
+.prow-res.tie .prow-side { flex-direction: column; align-items: flex-end; gap: 2px; }
+.mini-res { grid-template-columns: 20px 56px minmax(0, 1fr) 14px; gap: 5px; }
+
+/* Cartes à voter : la question en grand et centrée, les choix plus petits */
+.poll.todo { padding: 14px 14px 8px; }
+.poll.todo .poll-top { margin-bottom: 4px; }
+.poll.todo .question { font-size: 1.32rem; line-height: 1.28; text-align: center; margin: 6px 4px 14px; }
+.poll.todo .vote-list { gap: 6px; }
+.poll.todo .vote-opt { padding: 5px 8px 5px 5px; font-size: 0.86rem; border-radius: 11px; gap: 6px; }
+.poll.todo .vote-opt .avatar { width: 24px; height: 24px; }
+.poll.todo .poll-foot { margin-top: 10px; }
+.poll.todo .custom-tag { margin: -14px -14px 10px; padding: 7px 14px; }
+.vote-list.cols3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.poll.todo .vote-list.cols3 .vote-opt { padding: 5px 6px 5px 4px; gap: 5px; font-size: 0.82rem; }
+.poll.todo .vote-list.cols3 .vote-opt .avatar { width: 22px; height: 22px; }

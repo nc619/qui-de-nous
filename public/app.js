@@ -591,7 +591,7 @@
 
     let body;
     if (voting) {
-      body = `<div class="vote-list">${state.players
+      body = `<div class="vote-list ${state.players.length + (p.nobody ? 1 : 0) > 6 ? 'cols3' : ''}">${state.players
         .map((u) => `
           <button class="vote-opt ${p.myVote === u.id ? 'picked' : ''}" data-vote="${p.id}" data-target="${u.id}">
             ${avatar(u, 'sm')}<span>${esc(u.id === state.me.playerId ? u.name + ' (moi)' : u.name)}</span>
@@ -685,7 +685,7 @@
           <span class="prow-q">${author ? `<span class="prow-pen" title="Question de ${esc(author.name)}">${icon('pen')}</span>` : ''}${esc(p.text)}</span>
           ${c.count ? `<span class="prow-chat ${c.unread ? 'new' : ''}">${icon('comment')}${c.unread || c.count}</span>` : ''}
         </span>
-        <span class="prow-res">
+        <span class="prow-res ${leaders.length > 1 ? 'tie' : ''}">
           <span class="mini-bars">${bars || '<span class="muted small">Aucun vote</span>'}</span>
           <span class="prow-side">${p.ended ? '' : timeLeft(p)}<span class="vote-count">${p.voterIds.length}/${members()}</span></span>
         </span>
