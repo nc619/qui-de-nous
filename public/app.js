@@ -29,7 +29,8 @@
   const openVoters = new Set(); // barres de résultats dont on a déroulé la liste des votants ("sondage:personne")
   let animating = false; // animation de vote en cours
   let pendingRender = false;
-  let flashId = null; // ligne à faire briller après l'animation
+  let flashId = null;
+  let doneFolded = load('doneFolded') === '1'; // section « Déjà voté » repliée // ligne à faire briller après l'animation
 
   // ---------- Utilitaires ----------
 
@@ -672,7 +673,7 @@
     const bars = leaders.slice(0, 2).map((u) => `
       <span class="mini-res" style="--pc:${esc(u.color)}">
         ${avatar(u, 'xs')}
-        <span class="mr-name">${esc(u.id === state.me.playerId ? 'Toi' : u.name)}</span>
+        <span class="mr-name">${esc(Array.from(u.id === state.me.playerId ? 'Toi' : u.name).slice(0, 8).join(''))}</span>
         <span class="mini-track"><span class="mini-fill" style="width:${((max / total) * 100).toFixed(1)}%"></span></span>
         <span class="mr-n">${max}</span>
       </span>`).join('') + (leaders.length > 2 ? `<span class="tie-more">+${leaders.length - 2} ex æquo</span>` : '');
@@ -871,13 +872,15 @@
         </div>` : ''}
       ${todo.length ? `<div class="section-title">À toi de voter <span class="count">${todo.length}</span></div>${todo.map((p) => pollCard(p)).join('')}` : ''}
       ${!todo.length && done.length ? '<p class="all-done">Tu as voté partout.</p>' : ''}
-      ${done.length ? `<div class="section-title">Déjà voté <span class="count">${done.length}</span></div><div class="prow-list">${done.map(pollItem).join('')}</div>` : ''}
+      ${done.length ? `<button class="section-title fold-title ${doneFolded ? 'folded' : ''}" id="doneToggle" aria-expanded="${!doneFolded}">Déjà voté <span class="count">${done.length}</span>${icon('down')}</button>${doneFolded ? '' : `<div class="prow-list">${done.map(pollItem).join('')}</div>`}` : ''}
       <button class="fab" id="fab" aria-label="Lancer une question">${icon('plus')}</button>`;
 
     bindPollCards(view);
     bindLiveSwitch(view);
     bindInstallBanner();
     document.getElementById('fab').onclick = () => openDropSheet();
+    const dt = document.getElementById('doneToggle');
+    if (dt) dt.onclick = () => { doneFolded = !doneFolded; save('doneFolded', doneFolded ? '1' : null); renderView(); };
     const meter = document.getElementById('dropMeter');
     if (meter) meter.onclick = openDropInfo;
   }
@@ -1862,14 +1865,12 @@
 
   function msgDetail(c, m) {
     const mine = m.playerId === state.me.playerId;
-    const { seen, unseen } = seenBy(c, m);
     const reacts = reactionGroups(m);
-    const people = (list) => list.map((p) => `<span class="who">${avatar(p, 'xs')}${esc(p.name)}</span>`).join('');
     return `
       <div class="msg-detail ${mine ? 'mine' : ''}">
-        ${reacts.length ? `<div class="md-row"><span class="md-label">Réactions</span><div class="md-people">${reacts.map((r) => `<span class="who">${r.emoji} ${r.players.map((pid) => esc(pid === state.me.playerId ? 'toi' : player(pid).name)).join(', ')}</span>`).join('')}</div></div>` : ''}
-        <div class="md-row"><span class="md-label">Vu par</span><div class="md-people">${seen.length ? people(seen) : '<span class="muted">personne pour l’instant</span>'}</div></div>
-        ${unseen.length ? `<div class="md-row"><span class="md-label">Pas encore vu</span><div class="md-people dim">${people(unseen)}</div></div>` : ''}
+        <div class="md-reacts">${reacts.length
+          ? reacts.map((r) => `<span class="md-react"><span class="md-emoji">${r.emoji}</span><span class="md-names">${r.players.map((pid) => `<b class="pname" style="--pc:${esc(player(pid).color)}">${esc(pid === state.me.playerId ? 'Toi' : player(pid).name)}</b>`).join(', ')}</span></span>`).join('')
+          : '<span class="muted">Pas encore de réaction · reste appuyé pour réagir</span>'}</div>
         <div class="md-foot">
           <span class="muted">${hhmm(m.at)}</span>
           ${mine || state.me.isAdmin ? `<button class="md-del" data-delmsg="${m.id}">${icon('trash')}Supprimer</button>` : ''}

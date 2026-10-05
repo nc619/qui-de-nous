@@ -1868,3 +1868,41 @@ main { padding-top: 10px; }
 .emoji-all { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 2px; max-height: 38vh; overflow-y: auto; overscroll-behavior: contain; padding: 2px; }
 .emoji-all button { height: 40px; border-radius: 10px; font-size: 1.4rem; }
 .sheet-wrap { z-index: 48; } /* au-dessus de la fenêtre de chat (réactions) */
+
+/* =====================================================================
+   v10 : lignes repliées alignées, section repliable, cartes à voter plus grandes,
+   détail d'un message = réactions seulement
+   ===================================================================== */
+
+/* Lignes repliées : colonnes fixes → barres de même taille partout */
+.prow-res { display: grid; grid-template-columns: minmax(0, 1fr) 44px; align-items: center; gap: 10px; padding-left: 38px; }
+.mini-res { display: grid; grid-template-columns: 20px 62px minmax(0, 1fr) 16px; align-items: center; gap: 6px; }
+.mr-name { max-width: none; overflow: hidden; text-overflow: clip; white-space: nowrap; }
+.mr-n { text-align: right; }
+.mini-track { min-width: 0; }
+.prow-side { flex-direction: column; align-items: flex-end; justify-content: center; gap: 2px; width: 44px; }
+.prow-side .tleft { font-size: 0.72rem; }
+.prow-side .vote-count { font-size: 0.72rem; }
+.prow-top { padding-right: 0; }
+.prow-chat { flex-shrink: 0; }
+
+/* Titre de section cliquable */
+.fold-title { display: flex; align-items: center; gap: 6px; width: calc(100% - 8px); background: none; border: 0; text-align: left; cursor: pointer; }
+.fold-title .ico-svg { width: 15px; height: 15px; margin-left: auto; transition: transform 0.2s; }
+.fold-title.folded .ico-svg { transform: rotate(-90deg); }
+
+/* Cartes encore à voter : plus généreuses */
+.poll.todo { padding: 16px 16px 10px; }
+.poll.todo .question { font-size: 1.22rem; line-height: 1.3; margin: 2px 0 14px; }
+.poll.todo .poll-top { font-size: 0.8rem; margin-bottom: 6px; }
+.poll.todo .vote-list { gap: 8px; }
+.poll.todo .vote-opt { padding: 8px 10px 8px 7px; font-size: 0.95rem; border-radius: 13px; gap: 8px; }
+.poll.todo .vote-opt .avatar { width: 32px; height: 32px; }
+.poll.todo .poll-foot { margin-top: 12px; }
+.poll.todo .custom-tag { margin: -16px -16px 12px; padding: 8px 16px; }
+
+/* Chat : détail = réactions avec les prénoms */
+.md-reacts { display: flex; flex-direction: column; gap: 6px; font-size: 0.86rem; }
+.md-react { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
+.md-emoji { font-size: 1.15rem; margin-right: 4px; }
+.md-foot { margin-top: 8px; }
