@@ -922,11 +922,10 @@ async function api(req, res, url) {
       if (body.allowNobody != null) s.allowNobody = !!body.allowNobody;
       // La fin peut être de « début + 1 h » à « début − 1 h » (le lendemain) : la plage peut passer minuit.
       if (s.endHour === s.startHour) throw new HttpError(400, 'L’heure de fin ne peut pas être l’heure de début');
-      const durationChanged = s.pollHours !== g.settings.pollHours;
       const scheduleChanged = ['intervalHours', 'startHour', 'endHour', 'timezone'].some((k) => s[k] !== g.settings[k]);
       g.settings = s;
-      // Nouvelle durée de vote : appliquée aussi aux sondages en cours.
-      if (durationChanged) game.applyPollHours(g, now);
+      // Durée de vote : appliquée aussi aux sondages en cours.
+      game.applyPollHours(g, now);
       // Nouveau planning : pas de question qui tombe d'un coup pour un créneau déjà passé.
       if (scheduleChanged) g.lastAutoSlot = Math.max(g.lastAutoSlot || 0, latestSlot(now, s));
       persist();
