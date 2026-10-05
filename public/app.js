@@ -1010,11 +1010,16 @@
       const fixed = card.offsetHeight - list.offsetHeight;
       const room = avail - fixed;
       let pick = null;
-      for (const [cols, min, max] of [[1, 46, 78], [2, 38, 64], [3, 34, 50]]) {
+      // 2 colonnes en priorité (plus joli) ; 3 seulement pour les très grands groupes qui ne tiennent pas en 2.
+      for (const [cols, min, max] of [[1, 46, 78], [2, 32, 64], [3, 32, 50]]) {
         if (cols === 1 && n > 5) continue;
+        if (cols === 2 && n > 16) {
+          const rows2 = Math.ceil(n / 2);
+          if ((room - GAP * (rows2 - 1)) / rows2 < min) continue;
+        }
         const rows = Math.ceil(n / cols);
         const h = (room - GAP * (rows - 1)) / rows;
-        if (h >= min || cols === 3) {
+        if (h >= min || cols === 3 || (cols === 2 && n <= 16)) {
           pick = { cols, h: Math.max(min, Math.min(max, h)) };
           break;
         }
