@@ -202,13 +202,28 @@ function readsOf(g, channel) {
   return out;
 }
 
+// La discussion d'une question en cours reste fermée tant qu'on n'a pas voté
+// (on ne voit pas les messages, on ne peut pas écrire) : personne n'est influencé avant de voter.
+function chatLocked(g, channel, userId) {
+  if (channel === 'general') return false;
+  const poll = g.polls[channel];
+  return !!poll && poll.endsAt > Date.now() && !poll.votes[userId];
+}
+
+function checkUnlocked(g, channel, me) {
+  if (chatLocked(g, channel, me.id)) throw new HttpError(403, 'Vote d’abord pour voir et écrire dans la discussion');
+}
+
 function chatSummary(g, me, channel, lastN) {
   const list = chat.list(g.id, channel).filter((m) => !m.deleted);
+  const lastAt = list.length ? list[list.length - 1].at : 0;
+  if (chatLocked(g, channel, me.id)) return { count: list.length, unread: 0, last: [], lastAt, locked: true };
   const read = ((g.chatReads || {})[channel] || {})[me.id] || 0;
   return {
     count: list.length,
     unread: list.filter((m) => m.seq > read && m.userId !== me.id).length,
     last: list.slice(-lastN).map((m) => msgView(g, m)),
+    lastAt,
   };
 }
 
@@ -224,7 +239,7 @@ function chatThreads(g, me) {
     .filter((c) => c !== 'general' && g.polls[c])
     .map((c) => ({ channel: c, text: g.polls[c].text, setId: g.polls[c].setId, ...chatSummary(g, me, c, 1) }))
     .filter((t) => t.count)
-    .sort((a, b) => b.last[0].at - a.last[0].at)
+    .sort((a, b) => b.lastAt - a.lastAt)
     .slice(0, 40);
   return threads.concat(polls);
 }
@@ -244,12 +259,12 @@ const short = (s, n) => (s.length > n ? s.slice(0, n - 1) + '…' : s);
 function notifyChat(g, me, channel, msg) {
   const author = g.players[me.playerId];
   const where = channel === 'general' ? 'Chat du groupe' : short(g.polls[channel].text, 60);
-  push.notify(g, 'chat', {
+  push.notify(g, 'chat', (u) => ({
     title: `${author.name} · ${where}`,
-    body: msg.kind === 'gif' ? 'A envoyé un GIF' : short(msg.text, 160),
+    body: chatLocked(g, channel, u.id) ? 'Nouveau message · vote pour le voir' : msg.kind === 'gif' ? 'A envoyé un GIF' : short(msg.text, 160),
     tag: 'chat-' + channel,
     url: `/?chat=${channel}`,
-  }, me.id);
+  }), me.id);
 }
 
 // Notification de vote (premier vote seulement, sans dire pour qui).
@@ -421,6 +436,9 @@ async function api(req, res, url) {
     // --- Chat ---
     case 'GET /chat/:id': {
       const channel = checkChannel(g, id);
+      if (chatLocked(g, channel, me.id)) {
+        return ok({ channel, locked: true, messages: [], hasMore: false, reads: {}, count: chat.list(g.id, channel).filter((m) => !m.deleted).length });
+      }
       const all = chat.list(g.id, channel);
       const before = Number(url.searchParams.get('before')) || Infinity;
       const older = all.filter((m) => m.seq < before);
@@ -430,6 +448,7 @@ async function api(req, res, url) {
 
     case 'POST /chat/:id': {
       const channel = checkChannel(g, id);
+      checkUnlocked(g, channel, me);
       checkSendRate(me.id);
       let msg;
       if (body.gif) {
@@ -445,14 +464,15 @@ async function api(req, res, url) {
       const saved = chat.add(g.id, msg);
       markRead(g, channel, me.id, saved.seq);
       const view = msgView(g, saved);
-      live.emit(g.id, 'msg', view);
-      live.emit(g.id, 'read', { channel, playerId: me.playerId, seq: saved.seq });
+      live.emit(g.id, 'msg', (uid) => (chatLocked(g, channel, uid) ? { channel, id: view.id, locked: true } : view));
+      live.emit(g.id, 'read', (uid) => (chatLocked(g, channel, uid) ? null : { channel, playerId: me.playerId, seq: saved.seq }));
       notifyChat(g, me, channel, saved);
       return ok({ message: view });
     }
 
     case 'POST /chat/:id/read': {
       const channel = checkChannel(g, id);
+      if (chatLocked(g, channel, me.id)) return ok();
       const last = chat.list(g.id, channel).at(-1);
       const seq = Math.min(Number(body.seq) || 0, last ? last.seq : 0);
       if (seq && markRead(g, channel, me.id, seq)) live.emit(g.id, 'read', { channel, playerId: me.playerId, seq }, me.id);
@@ -461,7 +481,8 @@ async function api(req, res, url) {
 
     case 'POST /chat/:id/typing':
       checkChannel(g, id);
-      live.emit(g.id, 'typing', { channel: id, playerId: me.playerId }, me.id);
+      checkUnlocked(g, id, me);
+      live.emit(g.id, 'typing', (uid) => (chatLocked(g, id, uid) ? null : { channel: id, playerId: me.playerId }), me.id);
       return ok();
 
     case 'DELETE /chat/:id/messages/:id': {
@@ -477,13 +498,14 @@ async function api(req, res, url) {
     // Réagir à un message (une réaction par personne ; la même une 2e fois = on l'enlève).
     case 'POST /chat/:id/messages/:id/react': {
       const channel = checkChannel(g, id);
+      checkUnlocked(g, channel, me);
       const m = chat.get(g.id, Number(ids[1]));
       if (!m || m.channel !== channel || m.deleted) throw new HttpError(404, 'Message introuvable');
       const emoji = body.emoji == null ? null : String(body.emoji);
       if (emoji && !isReaction(emoji)) throw new HttpError(400, 'Réaction invalide : un seul emoji');
       const saved = chat.react(g.id, m.seq, me.id, emoji && (m.reactions || {})[me.id] !== emoji ? emoji : null);
       const view = msgView(g, saved);
-      live.emit(g.id, 'react', { channel, id: m.seq, reactions: view.reactions });
+      live.emit(g.id, 'react', (uid) => (chatLocked(g, channel, uid) ? null : { channel, id: m.seq, reactions: view.reactions }));
       return ok({ message: view });
     }
 

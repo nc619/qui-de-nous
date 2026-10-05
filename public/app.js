@@ -70,6 +70,7 @@
     pen: '<path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>',
     check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
     down: '<path d="M6 9l6 6 6-6"/>',
+    lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
   };
   function icon(name, cls = '') {
     return `<svg class="ico-svg ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ''}</svg>`;
@@ -652,7 +653,7 @@
             ${by && !(author && author.id === by.id) ? `<span class="by">· par ${esc(by.name)}</span>` : ''}
           </span>
           <span class="foot-actions">
-            ${comments ? '' : `<button class="more-btn" data-chat="${p.id}" aria-label="Commenter">${icon('comment')}</button>`}
+            ${comments || (p.chat && p.chat.locked) ? '' : `<button class="more-btn" data-chat="${p.id}" aria-label="Commenter">${icon('comment')}</button>`}
             ${hasMenu ? `<button class="more-btn" data-more="${p.id}" aria-label="Options">${icon('more')}</button>` : ''}
           </span>
         </div>
@@ -723,6 +724,11 @@
 
   function pollChatPreview(p) {
     const c = p.chat || { count: 0, unread: 0, last: [] };
+    if (c.locked) {
+      return c.count
+        ? `<div class="poll-chat locked"><span class="pc-ico">${icon('lock')}</span><span class="pc-body muted">${plural(c.count, 'commentaire')} · vote pour les voir</span></div>`
+        : '';
+    }
     if (!c.count) return '';
     const lines = c.last.map((m) => {
       const u = player(m.playerId);
@@ -801,6 +807,7 @@
       const [{ poll }] = await Promise.all([api('POST', `polls/${id}/vote`, { playerId: b.dataset.target }), wait(calm() ? 0 : 500)]);
       replacePoll(poll);
       editing = null;
+      chats.delete(id);
       const tmp = document.createElement('div');
       tmp.innerHTML = pollCard(poll, { justVoted: true, collapsible: !firstVote });
       const fresh = tmp.firstElementChild;
@@ -1564,7 +1571,14 @@
     if (type === 'refresh') return scheduleRefresh();
     const c = chats.get(d.channel);
     if (type === 'msg') {
-      if (c && !c.messages.some((m) => m.id === d.id)) c.messages.push(d);
+      if (d.locked) {
+        if (c && c.locked) {
+          c.count = (c.count || 0) + 1;
+          if (chatOpen === d.channel) renderChatMessages();
+        }
+        return scheduleRefresh();
+      }
+      if (c && !c.locked && !c.messages.some((m) => m.id === d.id)) c.messages.push(d);
       typing.get(d.channel)?.delete(d.playerId);
       if (chatOpen === d.channel) {
         renderChatMessages();
@@ -1603,6 +1617,7 @@
   // ---------- Chat : liste des discussions ----------
 
   function lastLine(t) {
+    if (t.locked) return `<span class="locked-line">${icon('lock')}Vote pour voir les messages</span>`;
     const m = t.last[0];
     if (!m) return '<i>Aucun message : lance la discussion !</i>';
     const who = m.playerId === state.me.playerId ? 'Toi' : esc(player(m.playerId).name);
@@ -1822,7 +1837,7 @@
     }
     try {
       const r = await api('GET', `chat/${channel}`);
-      chats.set(channel, { messages: r.messages, reads: r.reads, hasMore: r.hasMore, loaded: true });
+      chats.set(channel, { messages: r.messages, reads: r.reads, hasMore: r.hasMore, loaded: true, locked: !!r.locked, count: r.count || 0 });
       if (chatOpen === channel) {
         renderChatMessages(true);
         markReadSoon();
@@ -1964,6 +1979,23 @@
     if (!list || !c) return;
     const atBottom = forceBottom || list.scrollHeight - list.scrollTop - list.clientHeight < 120;
     const myPid = state.me.playerId;
+    lockChatInput(!!c.locked);
+    if (c.locked) {
+      list.innerHTML = `
+        <div class="chat-locked">
+          <span class="cl-ico">${icon('lock')}</span>
+          <b>Vote d’abord</b>
+          <p class="muted">${c.count ? `${plural(c.count, 'message')} t’attend${c.count > 1 ? 'ent' : ''} ici. ` : ''}Pour que personne ne soit influencé, la discussion s’ouvre une fois que tu as voté.</p>
+          <button class="btn btn-main" id="goVote">Aller voter</button>
+        </div>`;
+      document.getElementById('goVote').onclick = () => {
+        const id = chatOpen;
+        closeChat();
+        if (tab !== 'live' || liveMode !== 'live') { tab = 'live'; liveMode = 'live'; save('tab', tab); save('liveMode', liveMode); renderNav(); renderView(); }
+        setTimeout(() => document.querySelector(`[data-poll="${id}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' }), 50);
+      };
+      return;
+    }
     if (selMsg && !c.messages.some((m) => m.id === selMsg && !m.deleted)) selMsg = null;
 
     let html = c.hasMore ? '<button class="chat-older" id="chatOlder">Messages précédents</button>' : '';
@@ -2035,6 +2067,15 @@
       });
     }
     if (atBottom) scrollChatBottom();
+  }
+
+  function lockChatInput(locked) {
+    const form = document.getElementById('chatForm');
+    if (!form) return;
+    form.classList.toggle('locked', locked);
+    form.querySelectorAll('textarea, button').forEach((el) => (el.disabled = locked));
+    const t = document.getElementById('chatText');
+    if (t) t.placeholder = locked ? 'Vote d’abord pour écrire…' : 'Message…';
   }
 
   function renderTyping() {

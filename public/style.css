@@ -1906,3 +1906,15 @@ main { padding-top: 10px; }
 .md-react { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
 .md-emoji { font-size: 1.15rem; margin-right: 4px; }
 .md-foot { margin-top: 8px; }
+
+/* Discussion fermée tant qu'on n'a pas voté */
+.poll-chat.locked { cursor: default; }
+.poll-chat.locked .pc-ico .ico-svg { width: 16px; height: 16px; }
+.locked-line { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); }
+.locked-line .ico-svg { width: 13px; height: 13px; }
+.chat-locked { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 8px; padding: 56px 28px; }
+.chat-locked .cl-ico { width: 56px; height: 56px; border-radius: 50%; background: var(--soft); display: grid; place-items: center; color: var(--accent-text); }
+.chat-locked .cl-ico .ico-svg { width: 26px; height: 26px; }
+.chat-locked b { font-size: 1.15rem; }
+.chat-locked p { margin: 0 0 8px; font-size: 0.9rem; line-height: 1.4; }
+.chat-input.locked { opacity: 0.55; }
