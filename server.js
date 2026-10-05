@@ -190,7 +190,8 @@ function msgView(g, m) {
   };
 }
 
-const REACTIONS = ['❤️', '😂', '😮', '😢', '🔥', '👍'];
+// Réaction : un seul emoji (n'importe lequel, y compris avec couleur de peau, drapeaux, combinaisons).
+const isReaction = (e) => e.length <= 24 && /^(?:\p{Extended_Pictographic}|\p{Regional_Indicator}|\p{Emoji_Modifier}|\p{Emoji_Component}|\u200d|\ufe0f|\u20e3)+$/u.test(e) && /\p{Extended_Pictographic}|\p{Regional_Indicator}/u.test(e);
 
 function readsOf(g, channel) {
   const out = {};
@@ -479,7 +480,7 @@ async function api(req, res, url) {
       const m = chat.get(g.id, Number(ids[1]));
       if (!m || m.channel !== channel || m.deleted) throw new HttpError(404, 'Message introuvable');
       const emoji = body.emoji == null ? null : String(body.emoji);
-      if (emoji && !REACTIONS.includes(emoji)) throw new HttpError(400, 'Réaction inconnue');
+      if (emoji && !isReaction(emoji)) throw new HttpError(400, 'Réaction invalide : un seul emoji');
       const saved = chat.react(g.id, m.seq, me.id, emoji && (m.reactions || {})[me.id] !== emoji ? emoji : null);
       const view = msgView(g, saved);
       live.emit(g.id, 'react', { channel, id: m.seq, reactions: view.reactions });

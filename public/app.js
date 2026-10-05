@@ -1862,13 +1862,11 @@
 
   function msgDetail(c, m) {
     const mine = m.playerId === state.me.playerId;
-    const myReact = (m.reactions || {})[state.me.playerId];
     const { seen, unseen } = seenBy(c, m);
     const reacts = reactionGroups(m);
     const people = (list) => list.map((p) => `<span class="who">${avatar(p, 'xs')}${esc(p.name)}</span>`).join('');
     return `
       <div class="msg-detail ${mine ? 'mine' : ''}">
-        <div class="react-bar">${REACTIONS.map((e) => `<button data-react="${e}" data-id="${m.id}" class="${myReact === e ? 'on' : ''}" aria-label="Réagir ${e}">${e}</button>`).join('')}</div>
         ${reacts.length ? `<div class="md-row"><span class="md-label">Réactions</span><div class="md-people">${reacts.map((r) => `<span class="who">${r.emoji} ${r.players.map((pid) => esc(pid === state.me.playerId ? 'toi' : player(pid).name)).join(', ')}</span>`).join('')}</div></div>` : ''}
         <div class="md-row"><span class="md-label">Vu par</span><div class="md-people">${seen.length ? people(seen) : '<span class="muted">personne pour l’instant</span>'}</div></div>
         ${unseen.length ? `<div class="md-row"><span class="md-label">Pas encore vu</span><div class="md-people dim">${people(unseen)}</div></div>` : ''}
@@ -1885,11 +1883,78 @@
       const { message } = await api('POST', `chat/${channel}/messages/${id}/react`, { emoji });
       const m = chats.get(channel)?.messages.find((x) => x.id === id);
       if (m) m.reactions = message.reactions;
-      selMsg = null;
       if (chatOpen === channel) renderChatMessages();
     } catch (e) {
       toast(e.message);
     }
+  }
+
+  // Appui long sur un message : choisir une réaction (raccourcis, grande grille, ou n'importe quel emoji du clavier).
+  const EMOJI_GRID = (
+    '😀 😃 😄 😁 😆 🥹 😅 🤣 😂 🙂 🙃 😉 😊 😇 🥰 😍 🤩 😘 😋 😛 😜 🤪 😝 🤑 🤗 🤭 🫢 🤫 🤔 🫡 🤐 🤨 😐 😑 😶 🫥 😏 😒 🙄 😬 😮‍💨 🤥 😌 😔 😪 🤤 😴 😷 🤒 🤕 🤢 🤮 🥵 🥶 🥴 😵 🤯 🤠 🥳 🥸 😎 🤓 🧐 😕 🫤 😟 🙁 😮 😯 😲 😳 🥺 🥲 😦 😧 😨 😰 😥 😢 😭 😱 😖 😣 😞 😓 😩 😫 🥱 😤 😡 😠 🤬 😈 👿 💀 ☠️ 💩 🤡 👹 👻 👽 🤖 😺 🙈 🙉 🙊 ' +
+    '❤️ 🧡 💛 💚 💙 💜 🖤 🤍 🤎 💔 ❤️‍🔥 💕 💞 💓 💗 💖 💘 💝 💯 💢 💥 💫 💦 💨 🔥 ✨ ⭐ 🌟 ⚡ 🎉 🎊 🏆 🥇 👑 💎 ' +
+    '👍 👎 👌 🤌 🤏 ✌️ 🤞 🫰 🤟 🤘 🤙 👈 👉 👆 👇 ☝️ ✋ 🤚 🖐️ 🖖 👋 👏 🙌 🫶 👐 🤲 🤝 🙏 💪 🫵 👀 👅 👄 🫦 🧠 ' +
+    '🍑 🍆 🌶️ 🍕 🍔 🍟 🌮 🍿 🍩 🍪 🎂 🍻 🍺 🍷 🥂 🍾 🥃 🍸 ☕ 🧃 🚬 💊 💸 💰 🚀 🚨 ⚠️ ❌ ✅ ❓ ❗ 💤 🐐 🐍 🦄 🐸 🐒 🦖 🐷 🐶 🐱 🦊 🐻 🐼 🦁 🐧 🦉 🐰 🐨'
+  ).split(' ');
+  const isEmoji = (s) => /\p{Extended_Pictographic}|\p{Regional_Indicator}/u.test(s);
+  function firstEmoji(text) {
+    const parts = typeof Intl !== 'undefined' && Intl.Segmenter
+      ? [...new Intl.Segmenter('fr', { granularity: 'grapheme' }).segment(text)].map((x) => x.segment)
+      : Array.from(text);
+    return parts.find(isEmoji) || null;
+  }
+
+  function openReactPicker(m) {
+    const mine = (m.reactions || {})[state.me.playerId];
+    const preview = m.kind === 'gif' ? 'GIF' : esc(m.text.length > 90 ? m.text.slice(0, 89) + '…' : m.text);
+    openSheet(`
+      <div class="sheet-head"><h2>Réagir</h2><button class="x" data-close>✕</button></div>
+      <p class="react-preview"><b class="pname" style="--pc:${esc(player(m.playerId).color)}">${esc(player(m.playerId).name)}</b> ${preview}</p>
+      <div class="react-quick">${REACTIONS.map((e) => `<button data-pick="${e}" class="${mine === e ? 'on' : ''}">${e}</button>`).join('')}</div>
+      <div class="react-type">
+        <input class="input" id="emojiInput" placeholder="Ou tape n’importe quel emoji…" autocomplete="off" enterkeyhint="done">
+      </div>
+      <div class="emoji-all">${EMOJI_GRID.map((e) => `<button data-pick="${e}" class="${mine === e ? 'on' : ''}">${e}</button>`).join('')}</div>
+      ${mine ? `<button class="link-btn" data-pick="${esc(mine)}">Retirer ma réaction ${mine}</button>` : ''}`, (root) => {
+      const pick = (e) => { closeSheet(); reactTo(m.id, e); };
+      root.querySelectorAll('[data-pick]').forEach((b) => (b.onclick = () => pick(b.dataset.pick)));
+      const input = root.querySelector('#emojiInput');
+      input.oninput = () => {
+        const e = firstEmoji(input.value);
+        if (e) pick(e);
+      };
+    });
+  }
+
+  // Tap = détail du message ; appui long (~0,45 s) = réagir.
+  function bindMessagePress(el, id) {
+    let timer = null;
+    let fired = false;
+    let start = null;
+    const cancel = () => { clearTimeout(timer); timer = null; };
+    el.addEventListener('pointerdown', (e) => {
+      fired = false;
+      start = [e.clientX, e.clientY];
+      cancel();
+      timer = setTimeout(() => {
+        fired = true;
+        timer = null;
+        if (navigator.vibrate) navigator.vibrate(12);
+        const m = chats.get(chatOpen)?.messages.find((x) => x.id === id);
+        if (m && !m.deleted) openReactPicker(m);
+      }, 450);
+    });
+    el.addEventListener('pointermove', (e) => {
+      if (timer && start && Math.hypot(e.clientX - start[0], e.clientY - start[1]) > 10) cancel();
+    });
+    ['pointerup', 'pointercancel', 'pointerleave'].forEach((t) => el.addEventListener(t, cancel));
+    el.addEventListener('contextmenu', (e) => e.preventDefault());
+    el.addEventListener('click', () => {
+      if (fired) { fired = false; return; } // l'appui long a déjà ouvert les réactions
+      selMsg = selMsg === id ? null : id;
+      renderChatMessages();
+      if (selMsg) document.querySelector('.msg-detail')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    });
   }
 
   function renderChatMessages(forceBottom) {
@@ -1946,15 +2011,7 @@
     list.innerHTML = html;
 
     list.querySelectorAll('img').forEach((img) => (img.onload = () => { if (atBottom) scrollChatBottom(); }));
-    list.querySelectorAll('[data-msg]').forEach((b) => {
-      b.onclick = () => {
-        const id = Number(b.dataset.msg);
-        selMsg = selMsg === id ? null : id;
-        renderChatMessages();
-        if (selMsg) document.querySelector('.msg-detail')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-      };
-    });
-    list.querySelectorAll('[data-react]').forEach((b) => (b.onclick = () => reactTo(Number(b.dataset.id), b.dataset.react)));
+    list.querySelectorAll('[data-msg]').forEach((b) => bindMessagePress(b, Number(b.dataset.msg)));
     list.querySelectorAll('[data-delmsg]').forEach((b) => {
       b.onclick = async () => {
         if (!confirm('Supprimer ce message pour tout le monde ?')) return;
