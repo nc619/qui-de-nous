@@ -26,6 +26,10 @@
   let swReg = null;
   let inviteCode = new URLSearchParams(location.search).get('code');
   let pendingGroup = new URLSearchParams(location.search).get('g'); // groupe à ouvrir (lien d'une notification)
+  // Pas de lien : on revient là où on était (actualisation, app rouverte, page rechargée par le téléphone).
+  // Le groupe n'est oublié que quand on revient soi-même à l'accueil.
+  let restoring = !pendingGroup && !!load('group');
+  if (restoring) pendingGroup = load('group');
   let account = null; // accueil : { account, groups, vapidKey }
   let groupId = null; // groupe ouvert (null = accueil)
   const openPolls = new Set(); // sondages déjà votés / archivés dépliés par l'utilisateur
@@ -538,8 +542,11 @@
     if (!account.account.username) return renderUsernameSetup();
     syncPush();
     const wanted = pendingGroup && account.groups.find((x) => x.id === pendingGroup);
+    const restore = restoring && !inviteCode;
     pendingGroup = null;
-    if (wanted) return enterGroup(wanted.id);
+    restoring = false;
+    if (wanted && !(inviteCode && restore)) return enterGroup(wanted.id, { restore });
+    if (!wanted) save('group', null); // plus dans ce groupe
     renderLobby();
     if (inviteCode) {
       const c = inviteCode;
@@ -627,8 +634,9 @@
     });
   }
 
-  // Ouvrir un groupe : on repart d'un état propre (onglet Live).
-  async function enterGroup(id) {
+  // Ouvrir un groupe : on repart d'un état propre (onglet Live)… sauf si on y revient après une actualisation
+  // (opts.restore) : même onglet, mêmes archives, et la discussion qui était ouverte.
+  async function enterGroup(id, opts = {}) {
     stopLobbyPolling();
     stopLive();
     stopPolling();
@@ -647,10 +655,18 @@
     archiveSet = '';
     archiveExtra = null;
     halfPick = null;
-    tab = 'live';
-    liveMode = 'live';
-    save('tab', tab);
-    save('liveMode', liveMode);
+    if (opts.restore) {
+      tab = ['live', 'chat', 'sets', 'stats', 'me'].includes(load('tab')) ? load('tab') : 'live';
+      liveMode = load('liveMode') === 'archive' ? 'archive' : 'live';
+      const open = lastChat();
+      if (open && !pendingChat) pendingChat = open;
+    } else {
+      tab = 'live';
+      liveMode = 'live';
+      save('tab', tab);
+      save('liveMode', liveMode);
+      save('chat', null);
+    }
     pushSynced = false;
     $app.innerHTML = '<div class="auth"><span class="logo-emoji">🤔</span></div>';
     await refresh();
@@ -667,6 +683,8 @@
     const wasGuarded = !!(history.state && history.state.guard);
     state = null;
     groupId = null;
+    save('group', null); // revenu à l'accueil exprès : au prochain lancement, on reste sur l'accueil
+    save('chat', null);
     if (!$sheet.hidden) closeSheet();
     if (wasGuarded) {
       popIgnore = true;
@@ -2635,9 +2653,18 @@
     return [...state.live, ...state.archive, ...((archiveExtra && archiveExtra.items) || [])].find((p) => p.id === id);
   }
 
+  // Discussion ouverte : gardée un moment pour la rouvrir après une actualisation.
+  function lastChat() {
+    try {
+      const c = JSON.parse(load('chat') || 'null');
+      return c && c.group === groupId && Date.now() - c.at < 30 * 60 * 1000 ? c.channel : null;
+    } catch { return null; }
+  }
+
   function openChat(channel) {
     if (chatOpen) closeChat(true);
     chatOpen = channel;
+    save('chat', JSON.stringify({ group: groupId, channel, at: Date.now() }));
     selMsg = null;
     replyTo = null;
     pendingImages = [];
@@ -2729,6 +2756,7 @@
   function closeChat(silent) {
     if (!chatOpen) return;
     chatOpen = null;
+    save('chat', null);
     replyTo = null;
     $chat.hidden = true;
     $chat.innerHTML = '';
