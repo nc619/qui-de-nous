@@ -28,6 +28,7 @@
   let pendingGroup = new URLSearchParams(location.search).get('g'); // groupe à ouvrir (lien d'une notification)
   let pendingRecap = new URLSearchParams(location.search).get('recap'); // récap du mois à ouvrir (notification)
   let pendingNews = new URLSearchParams(location.search).has('news'); // nouveautés (notification de nouvelle version)
+  let pendingQuiz = new URLSearchParams(location.search).has('quiz'); // l'admin demande de remplir le questionnaire
   let pendingFeedback = new URLSearchParams(location.search).has('feedback'); // avis reçu (développeur)
   // Fuseau horaire de ce téléphone : toutes les heures sont affichées dans l'heure locale de chacun.
   const myTz = (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'Europe/Paris'; } catch { return 'Europe/Paris'; } })();
@@ -46,37 +47,44 @@
   let statsMode = load('statsMode') || 'me'; // onglet Stats : 'me' (profil), 'duo' (affinités), 'group'
   let halfPick = null; // { pollId, picks: [playerId] } : demi-vote en cours (« j'hésite »)
 
-  // ---------- Langue (français / anglais) ----------
-  // Par défaut : la langue du lien d'où on vient (/en → anglais, sinon français). On peut changer dans Moi.
-  // Le choix est gardé sur l'appareil ; ouvrir un lien /en repasse en anglais tant qu'on n'a pas choisi soi-même.
-  const fromEn = /^\/en(\/|$)/.test(location.pathname) || document.documentElement.dataset.lang === 'en';
-  let LANG = load('lang') || (fromEn ? 'en' : 'fr');
-  if (fromEn && !load('langPicked')) LANG = 'en';
-  if (LANG !== 'en') LANG = 'fr';
+  // ---------- Langue (français / anglais / espagnol) ----------
+  // Par défaut : la langue du lien d'où on vient (/en → anglais, /es → espagnol, sinon français). On peut changer
+  // dans Moi. Le choix est gardé sur l'appareil ; ouvrir un lien /en ou /es y repasse tant qu'on n'a pas choisi soi-même.
+  const LANGS = ['fr', 'en', 'es'];
+  const pathLang = (/^\/(en|es)(\/|$)/.exec(location.pathname) || [])[1] || (['en', 'es'].includes(document.documentElement.dataset.lang) ? document.documentElement.dataset.lang : null);
+  let LANG = load('lang') || pathLang || 'fr';
+  if (pathLang && !load('langPicked')) LANG = pathLang;
+  if (!LANGS.includes(LANG)) LANG = 'fr';
   save('lang', LANG);
-  const BASE = fromEn ? '/en/' : '/';
-  let L = LANG === 'en';
-  let LOC = L ? 'en-GB' : 'fr-FR';
-  const T = (fr, en) => (L ? en : fr);
+  const BASE = pathLang ? `/${pathLang}/` : '/';
+  const LOCALES = { fr: 'fr-FR', en: 'en-GB', es: 'es-ES' };
+  let L = LANG === 'en'; // anglais (pluriels et nombres à l'anglaise)
+  let ES = LANG === 'es';
+  let LOC = LOCALES[LANG];
+  // Texte dans la langue de l'app : T('français', 'english', 'español').
+  const T = (fr, en, es) => (LANG === 'en' ? en : LANG === 'es' ? (es ?? en) : fr);
   function applyLang() {
     L = LANG === 'en';
-    LOC = L ? 'en-GB' : 'fr-FR';
+    ES = LANG === 'es';
+    LOC = LOCALES[LANG];
     document.documentElement.lang = LANG;
   }
   applyLang();
   function setLang(lang) {
-    LANG = lang === 'en' ? 'en' : 'fr';
+    LANG = LANGS.includes(lang) ? lang : 'fr';
     save('lang', LANG);
     save('langPicked', '1');
     applyLang();
   }
-  // Textes qui existent dans les deux langues (questions intégrées, sets, stats).
-  const qText = (x) => (x && (L && x.textEn ? x.textEn : x.text)) || '';
-  const setName = (x) => (L && x.nameEn) || x.name;
-  const setDesc = (x) => (L && x.descriptionEn) || x.description;
-  const statLabel = (d) => (L && d.en ? d.en.label : d.label);
-  const statTitle = (d) => (L && d.en ? d.en.title : d.title);
-  const titleText = (t) => (L && t.titleEn) || t.title;
+  const langLink = (lang) => (lang === 'fr' ? '/' : `/${lang}/`);
+  // Textes qui existent dans plusieurs langues (questions intégrées, sets, stats) : repli sur le français.
+  const pick = (x, fr, en, es) => (x ? (L && x[en]) || (ES && (x[es] || x[en])) || x[fr] : '');
+  const qText = (x) => pick(x, 'text', 'textEn', 'textEs') || '';
+  const setName = (x) => pick(x, 'name', 'nameEn', 'nameEs');
+  const setDesc = (x) => pick(x, 'description', 'descriptionEn', 'descriptionEs');
+  const statLabel = (d) => (L && d.en ? d.en.label : ES && d.es ? d.es.label : d.label);
+  const statTitle = (d) => (L && d.en ? d.en.title : ES && d.es ? d.es.title : d.title);
+  const titleText = (t) => pick(t, 'title', 'titleEn', 'titleEs');
   // Nombre de votes (avec les demi-votes) : 2,5 → « 2½ ».
   const num = (n) => (Number.isInteger(n) ? String(n) : `${Math.floor(n) || ''}½`);
 
@@ -150,13 +158,13 @@
 
   function ago(t) {
     const s = Math.floor((now() - t) / 1000);
-    if (s < 60) return T('à l’instant', 'just now');
+    if (s < 60) return T('à l’instant', 'just now', 'ahora mismo');
     const m = Math.floor(s / 60);
-    if (m < 60) return T(`il y a ${m} min`, `${m} min ago`);
+    if (m < 60) return T(`il y a ${m} min`, `${m} min ago`, `hace ${m} min`);
     const h = Math.floor(m / 60);
-    if (h < 24) return T(`il y a ${h} h`, `${h}h ago`);
+    if (h < 24) return T(`il y a ${h} h`, `${h}h ago`, `hace ${h} h`);
     const d = Math.floor(h / 24);
-    if (d < 7) return T(`il y a ${d} j`, `${d}d ago`);
+    if (d < 7) return T(`il y a ${d} j`, `${d}d ago`, `hace ${d} d`);
     return new Date(t).toLocaleDateString(LOC, { day: 'numeric', month: 'short' });
   }
 
@@ -164,7 +172,7 @@
     const m = Math.max(0, Math.round((t - now()) / 60000));
     if (m < 60) return `${m} min`;
     const h = Math.floor(m / 60);
-    return h < 48 ? `${h} h ${String(m % 60).padStart(2, '0')}` : T(`${Math.floor(h / 24)} j`, `${Math.floor(h / 24)} days`);
+    return h < 48 ? `${h} h ${String(m % 60).padStart(2, '0')}` : T(`${Math.floor(h / 24)} j`, `${Math.floor(h / 24)} days`, `${Math.floor(h / 24)} días`);
   }
 
   // Heures : toujours dans le fuseau de ce téléphone. La plage horaire du groupe est réglée dans le fuseau du
@@ -191,19 +199,19 @@
     const d = new Date(t);
     const sameDay = d.toLocaleDateString('fr-FR', { timeZone: myTz }) === new Date(now()).toLocaleDateString('fr-FR', { timeZone: myTz });
     const time = d.toLocaleTimeString(LOC, opts);
-    return (sameDay ? '' : T('demain ', 'tomorrow ')) + (L ? time : time.replace(':', 'h'));
+    return (sameDay ? '' : T('demain ', 'tomorrow ', 'mañana ')) + (LANG === 'fr' ? time.replace(':', 'h') : time);
   }
 
   // « 3 sondages » / « 3 polls » (pluriel anglais irrégulier : donner la forme en 3e argument).
-  const plural = (n, word, many) => `${n} ${n > 1 || (L && n === 0) ? many || word + 's' : word}`;
+  const plural = (n, word, many) => `${n} ${n > 1 || (LANG !== 'fr' && n === 0) ? many || word + 's' : word}`;
 
   const NOBODY = { id: 'nobody', name: 'Personne', emoji: '∅', color: '#8a7aa8' };
   function player(id) {
-    if (id === 'nobody') return { ...NOBODY, name: T('Personne', 'Nobody') };
+    if (id === 'nobody') return { ...NOBODY, name: T('Personne', 'Nobody', 'Nadie') };
     return state.players.find((p) => p.id === id) || { id, name: '???', emoji: '👻', color: '#999999' };
   }
   function setOf(id) {
-    return state.sets.find((s) => s.id === id) || { id, name: T('Set supprimé', 'Deleted set'), emoji: '🗑️', spicy: false };
+    return state.sets.find((s) => s.id === id) || { id, name: T('Set supprimé', 'Deleted set', 'Set eliminado'), emoji: '🗑️', spicy: false };
   }
   // Un vote : "id" (entier) ou ["a", "b"] (demi-votes).
   const votedFor = (v, id) => (Array.isArray(v) ? v.includes(id) : v === id);
@@ -211,7 +219,7 @@
 
   // Avatar : la photo de la personne, sinon son animal par défaut, toujours sur sa couleur.
   function avatar(p, size = '') {
-    if (p.id === 'nobody') return `<span class="avatar ${size} nobody-av" title="${T('Personne', 'Nobody')}">∅</span>`;
+    if (p.id === 'nobody') return `<span class="avatar ${size} nobody-av" title="${T('Personne', 'Nobody', 'Nadie')}">∅</span>`;
     const inner = p.photo
       ? `<img src="/api/photos/${esc(p.id)}?v=${esc(p.photo)}" alt="" loading="lazy" decoding="async">`
       : `<svg viewBox="0 0 64 64" aria-hidden="true"><use href="#an-${Number(p.animal) || 0}"/></svg>`;
@@ -232,7 +240,7 @@
         img.onload = () => cropPhoto(img).then((data) => { URL.revokeObjectURL(url); resolve(data); });
         img.onerror = () => {
           URL.revokeObjectURL(url);
-          toast(T('Image illisible', 'Can’t read that image'));
+          toast(T('Image illisible', 'Can’t read that image', 'No se puede leer la imagen'));
           resolve(null);
         };
         img.src = url;
@@ -256,8 +264,8 @@
       const finish = (v) => { if (!done) { done = true; resolve(v); } };
 
       openSheet(`
-        <div class="sheet-head"><h2>${T('Ta photo', 'Your photo')}</h2><button class="x" data-close>✕</button></div>
-        <p class="muted small crop-hint">${T('Pince ou utilise le curseur pour zoomer, glisse pour placer.', 'Pinch or use the slider to zoom, drag to move it.')}</p>
+        <div class="sheet-head"><h2>${T('Ta photo', 'Your photo', 'Tu foto')}</h2><button class="x" data-close>✕</button></div>
+        <p class="muted small crop-hint">${T('Pince ou utilise le curseur pour zoomer, glisse pour placer.', 'Pinch or use the slider to zoom, drag to move it.', 'Pellizca o usa la barra para hacer zoom, arrastra para colocarla.')}</p>
         <div class="crop-box" id="cropBox" style="width:${V}px;height:${V}px">
           <img id="cropImg" src="${img.src}" alt="" draggable="false">
           <div class="crop-ring"></div>
@@ -267,7 +275,7 @@
           <input type="range" id="cropZoom" min="1" max="${MAX}" step="0.01" value="1" aria-label="Zoom">
           <span>+</span>
         </div>
-        <button class="btn btn-main btn-block" id="cropOk">${T('Valider', 'Done')}</button>`, (root) => {
+        <button class="btn btn-main btn-block" id="cropOk">${T('Valider', 'Done', 'Listo')}</button>`, (root) => {
         const box = root.querySelector('#cropBox');
         const el = root.querySelector('#cropImg');
         const slider = root.querySelector('#cropZoom');
@@ -369,18 +377,18 @@
         body: body ? JSON.stringify(body) : undefined,
       });
     } catch {
-      throw new Error(T('Pas de connexion au serveur 📡', 'Can’t reach the server 📡'));
+      throw new Error(T('Pas de connexion au serveur 📡', 'Can’t reach the server 📡', 'Sin conexión con el servidor 📡'));
     }
     const data = await res.json().catch(() => ({}));
     if (res.status === 401 && token && !/^(login|accounts|account\/recover|account\/link)/.test(url) && !(url === 'account' && method === 'PATCH')) {
       logoutLocal();
-      throw new Error(T('Session expirée, reconnecte-toi', 'Session expired, log in again'));
+      throw new Error(T('Session expirée, reconnecte-toi', 'Session expired, log in again', 'Sesión caducada, vuelve a entrar'));
     }
     if (res.status === 403 && data.code === 'no-group' && groupId) {
       leaveGroup();
       throw new Error(data.error);
     }
-    if (!res.ok) throw new Error(data.error || (res.status === 413 ? T('Trop lourd 😬', 'Too big 😬') : T('Oups, erreur', 'Oops, something broke')));
+    if (!res.ok) throw new Error(data.error || (res.status === 413 ? T('Trop lourd 😬', 'Too big 😬', 'Pesa demasiado 😬') : T('Oups, erreur', 'Oops, something broke', 'Ups, algo ha fallado')));
     return data;
   }
 
@@ -444,11 +452,11 @@
         <div class="auth-box welcome">
           ${langSwitch('auth-lang')}
           <span class="logo-emoji">🤔</span>
-          <h1 class="logo">Qui de nous ?</h1>
-          <p class="tagline">${T('Des questions sur ta bande, plusieurs fois par jour. Tout le monde vote. Verdicts sans pitié.', 'Questions about your crew, a few times a day. Everyone votes. No mercy.')}</p>
-          <button class="btn btn-main btn-block" id="wJoin">${T('Rejoindre un groupe', 'Join a group')}</button>
-          <button class="btn btn-soft btn-block" id="wCreate">${T('Créer un groupe', 'Create a group')}</button>
-          <button class="link-btn welcome-login" id="wLogin">${T('J’ai déjà un compte', 'I already have an account')}</button>
+          <h1 class="logo">${T('Qui de nous ?', 'Which of us?', '¿Quién de nosotros?')}</h1>
+          <p class="tagline">${T('Des questions sur ta bande, plusieurs fois par jour. Tout le monde vote. Verdicts sans pitié.', 'Questions about your crew, a few times a day. Everyone votes. No mercy.', 'Preguntas sobre tu peña, varias veces al día. Vota todo el mundo. Veredictos sin piedad.')}</p>
+          <button class="btn btn-main btn-block" id="wJoin">${T('Rejoindre un groupe', 'Join a group', 'Unirme a un grupo')}</button>
+          <button class="btn btn-soft btn-block" id="wCreate">${T('Créer un groupe', 'Create a group', 'Crear un grupo')}</button>
+          <button class="link-btn welcome-login" id="wLogin">${T('J’ai déjà un compte', 'I already have an account', 'Ya tengo cuenta')}</button>
           <p class="error" id="authErr">${esc(err)}</p>
         </div>
       </div>`;
@@ -477,7 +485,7 @@
     token = data.token;
     save('token', token);
     save('joined', '1');
-    if (!(await loadAccount())) throw new Error(T('Impossible de créer ton compte. Réessaie.', 'Couldn’t create your account. Try again.'));
+    if (!(await loadAccount())) throw new Error(T('Impossible de créer ton compte. Réessaie.', 'Couldn’t create your account. Try again.', 'No se ha podido crear tu cuenta. Inténtalo otra vez.'));
   }
 
   // Connexion sur un autre téléphone : identifiant + PIN. 'legacy' : compte d'avant (code du groupe + pseudo + PIN).
@@ -487,29 +495,29 @@
     closeSheet();
     const draw = () => {
       const fields = mode === 'login' ? `
-          <label for="username">${T('Identifiant', 'Username')}</label>
-          <input class="input" id="username" required maxlength="20" autocapitalize="none" autocomplete="username" spellcheck="false" placeholder="${T('Ex : nico_4821', 'e.g. nico_4821')}" value="${esc(load('username') || '')}">
-          ${pinField(T('PIN', 'PIN'))}` : `
-          <div class="info">${T('Tu avais un compte avant la mise à jour ? Connecte-toi comme avant : code du groupe, pseudo et PIN.', 'Had an account before the update? Log in like before: group code, name and PIN.')}</div>
-          <label for="code">${T('Code du groupe', 'Group code')}</label>
+          <label for="username">${T('Identifiant', 'Username', 'Usuario')}</label>
+          <input class="input" id="username" required maxlength="20" autocapitalize="none" autocomplete="username" spellcheck="false" placeholder="${T('Ex : nico_4821', 'e.g. nico_4821', 'Ej.: nico_4821')}" value="${esc(load('username') || '')}">
+          ${pinField(T('PIN', 'PIN', 'PIN'))}` : `
+          <div class="info">${T('Tu avais un compte avant la mise à jour ? Connecte-toi comme avant : code du groupe, pseudo et PIN.', 'Had an account before the update? Log in like before: group code, name and PIN.', '¿Tenías cuenta antes de la actualización? Entra como antes: código del grupo, nombre y PIN.')}</div>
+          <label for="code">${T('Code du groupe', 'Group code', 'Código del grupo')}</label>
           <input class="input code-input" id="code" required autocapitalize="characters" autocomplete="off" maxlength="12" placeholder="Ex : K7QM2P" value="${esc(load('code') || '')}">
-          <label for="name">${T('Pseudo dans ce groupe', 'Your name in that group')}</label>
+          <label for="name">${T('Pseudo dans ce groupe', 'Your name in that group', 'Tu nombre en ese grupo')}</label>
           <input class="input" id="name" required maxlength="24" value="${esc(load('lastName') || '')}">
-          ${pinField(T('PIN', 'PIN'))}`;
+          ${pinField(T('PIN', 'PIN', 'PIN'))}`;
       $app.innerHTML = `
         <div class="auth">
           <form class="auth-box" id="authForm" autocomplete="on">
             ${langSwitch('auth-lang')}
-            <button type="button" class="back" id="authBack">← ${T('Retour', 'Back')}</button>
-            <h1 class="logo auth-title">${mode === 'login' ? T('Connexion', 'Log in') : T('Ancien compte', 'Older account')}</h1>
-            ${mode === 'login' ? `<p class="tagline">${T('Ton identifiant est dans Mes groupes → Mon compte, sur ton autre téléphone (avec le PIN que tu y as mis).', 'Your username is in My groups → My account, on your other phone (with the PIN you set there).')}</p>` : ''}
+            <button type="button" class="back" id="authBack">← ${T('Retour', 'Back', 'Volver')}</button>
+            <h1 class="logo auth-title">${mode === 'login' ? T('Connexion', 'Log in', 'Entrar') : T('Ancien compte', 'Older account', 'Cuenta antigua')}</h1>
+            ${mode === 'login' ? `<p class="tagline">${T('Ton identifiant est dans Mes groupes → Mon compte, sur ton autre téléphone (avec le PIN que tu y as mis).', 'Your username is in My groups → My account, on your other phone (with the PIN you set there).', 'Tu usuario está en Mis grupos → Mi cuenta, en tu otro móvil (con el PIN que pusiste ahí).')}</p>` : ''}
             ${fields}
-            <button class="btn btn-main btn-block" type="submit">${T('Entrer', 'Log in')}</button>
+            <button class="btn btn-main btn-block" type="submit">${T('Entrer', 'Log in', 'Entrar')}</button>
             <p class="error" id="authErr">${esc(err)}</p>
             ${mode === 'login' ? `
               <div class="auth-links">
-                <p class="muted small auth-help">${T('Pas de PIN, ou oublié ? Rejoins ton groupe avec son code et choisis ton nom : le groupe confirmera que c’est toi.', 'No PIN, or forgot it? Join your group with its code and pick your name: the group will confirm it’s you.')}</p>
-                <button type="button" class="link-btn" data-mode="legacy">${T('Compte d’avant la mise à jour (code + pseudo + PIN)', 'Account from before the update (code + name + PIN)')}</button>
+                <p class="muted small auth-help">${T('Pas de PIN, ou oublié ? Rejoins ton groupe avec son code et choisis ton nom : le groupe confirmera que c’est toi.', 'No PIN, or forgot it? Join your group with its code and pick your name: the group will confirm it’s you.', '¿No tienes PIN o se te ha olvidado? Únete a tu grupo con su código y elige tu nombre: el grupo confirmará que eres tú.')}</p>
+                <button type="button" class="link-btn" data-mode="legacy">${T('Compte d’avant la mise à jour (code + pseudo + PIN)', 'Account from before the update (code + name + PIN)', 'Cuenta de antes de la actualización (código + nombre + PIN)')}</button>
               </div>` : ''}
           </form>
         </div>`;
@@ -605,7 +613,7 @@
     if (!(await loadAccount())) {
       if (!token) return;
       if (painted) { if (state) startPolling(); return; } // hors ligne : on garde ce qui est affiché
-      renderAuth('login', T('Impossible de charger. Vérifie ta connexion et réessaie.', 'Couldn’t load. Check your connection and try again.'));
+      renderAuth('login', T('Impossible de charger. Vérifie ta connexion et réessaie.', 'Couldn’t load. Check your connection and try again.', 'No se ha podido cargar. Revisa tu conexión y prueba otra vez.'));
       return;
     }
     syncPush();
@@ -639,7 +647,7 @@
           renderLobby();
           const now_ = JSON.stringify(account.groups.map((x) => x.id));
           if (before !== now_ && account.groups.length > JSON.parse(before || '[]').length) {
-            toast(T('C’est validé, te revoilà dans le groupe 🎉', 'Approved, you’re back in the group 🎉'));
+            toast(T('C’est validé, te revoilà dans le groupe 🎉', 'Approved, you’re back in the group 🎉', '¡Listo, ya estás de vuelta en el grupo! 🎉'));
             syncPush(true);
           }
         }
@@ -662,7 +670,8 @@
     startLobbyPolling();
     const groups = account.groups;
     const total = groups.reduce((n, g) => n + g.todo + g.unread + (g.claims || 0), 0);
-    document.title = total ? `(${total}) Qui de nous ?` : 'Qui de nous ?';
+    const appName = T('Qui de nous ?', 'Which of us?', '¿Quién de nosotros?');
+    document.title = total ? `(${total}) ${appName}` : appName;
     if (navigator.setAppBadge) navigator.setAppBadge(total).catch(() => {});
     const acc = account.account;
 
@@ -673,13 +682,13 @@
         ${g.me ? avatar(g.me) : '<span class="avatar"></span>'}
         <span class="gc-main">
           <span class="gc-name">${esc(g.name)}</span>
-          <span class="gc-meta">${T('toi : ', 'you: ')}<b>${esc(g.me ? g.me.name : '?')}</b> · ${plural(g.members, T('membre', 'member'))}${g.isAdmin ? ' · admin' : ''}</span>
+          <span class="gc-meta">${T('toi : ', 'you: ', 'tú: ')}<b>${esc(g.me ? g.me.name : '?')}</b> · ${plural(g.members, T('membre', 'member', 'miembro'))}${g.isAdmin ? ' · admin' : ''}</span>
         </span>
         <span class="gc-badges">
-          ${st.group >= 2 ? `<span class="gb streak ${st.groupToday ? 'on' : ''}" title="${T('Série du groupe', 'Group streak')}">🔥${st.group}</span>` : ''}
-          ${g.claims ? `<span class="gb claim" title="${T('Demande à valider', 'Request to approve')}">${icon('key')}${g.claims}</span>` : ''}
-          ${g.todo ? `<span class="gb vote" title="${T('À voter', 'To vote')}">${icon('live')}${g.todo}</span>` : ''}
-          ${g.unread ? `<span class="gb chat" title="${T('Messages non lus', 'Unread messages')}">${icon('chat')}${g.unread}</span>` : ''}
+          ${st.group >= 2 ? `<span class="gb streak ${st.groupToday ? 'on' : ''}" title="${T('Série du groupe', 'Group streak', 'Racha del grupo')}">🔥${st.group}</span>` : ''}
+          ${g.claims ? `<span class="gb claim" title="${T('Demande à valider', 'Request to approve', 'Solicitud pendiente')}">${icon('key')}${g.claims}</span>` : ''}
+          ${g.todo ? `<span class="gb vote" title="${T('À voter', 'To vote', 'Por votar')}">${icon('live')}${g.todo}</span>` : ''}
+          ${g.unread ? `<span class="gb chat" title="${T('Messages non lus', 'Unread messages', 'Mensajes sin leer')}">${icon('chat')}${g.unread}</span>` : ''}
         </span>
       </button>`;
     };
@@ -689,42 +698,42 @@
         <div class="pc-main">
           <b>${esc(p.name)} · ${esc(p.group)}</b>
           <span class="muted small">${p.status === 'denied'
-            ? T('Demande refusée. Si c’est une erreur, parles-en au groupe et redemande.', 'Request denied. If that’s a mistake, talk to the group and ask again.')
+            ? T('Demande refusée. Si c’est une erreur, parles-en au groupe et redemande.', 'Request denied. If that’s a mistake, talk to the group and ask again.', 'Solicitud rechazada. Si es un error, díselo al grupo y vuelve a pedirlo.')
             : p.voters === 'admins'
-              ? T('En attente : l’admin doit confirmer que c’est toi.', 'Waiting: the admin has to confirm it’s you.')
-              : T(`En attente : ${p.needed} membre${p.needed > 1 ? 's' : ''} doivent confirmer que c’est toi (${p.approvals}/${p.needed}).`, `Waiting: ${p.needed} member${p.needed > 1 ? 's' : ''} need to confirm it’s you (${p.approvals}/${p.needed}).`)}</span>
+              ? T('En attente : l’admin doit confirmer que c’est toi.', 'Waiting: the admin has to confirm it’s you.', 'En espera: el admin tiene que confirmar que eres tú.')
+              : T(`En attente : ${p.needed} membre${p.needed > 1 ? 's' : ''} doivent confirmer que c’est toi (${p.approvals}/${p.needed}).`, `Waiting: ${p.needed} member${p.needed > 1 ? 's' : ''} need to confirm it’s you (${p.approvals}/${p.needed}).`, `En espera: ${p.needed} miembro${p.needed > 1 ? 's' : ''} tienen que confirmar que eres tú (${p.approvals}/${p.needed}).`)}</span>
         </div>
-        <button class="link-btn" data-cancelclaim="${p.id}">${p.status === 'denied' ? 'OK' : T('Annuler', 'Cancel')}</button>
+        <button class="link-btn" data-cancelclaim="${p.id}">${p.status === 'denied' ? 'OK' : T('Annuler', 'Cancel', 'Cancelar')}</button>
       </div>`).join('');
 
     $app.innerHTML = `
       <header class="top">
-        <h1>Qui de nous ?</h1>
+        <h1>${T('Qui de nous ?', 'Which of us?', '¿Quién de nosotros?')}</h1>
         <button class="theme-btn" id="themeBtn" role="switch"></button>
       </header>
       <main id="lobby" class="lobby">
-        ${pending ? `<div class="section-title">${T('Demandes envoyées', 'Requests sent')}</div>${pending}` : ''}
-        <div class="section-title">${T('Tes groupes', 'Your groups')} <span class="count">${groups.length}</span></div>
+        ${pending ? `<div class="section-title">${T('Demandes envoyées', 'Requests sent', 'Solicitudes enviadas')}</div>${pending}` : ''}
+        <div class="section-title">${T('Tes groupes', 'Your groups', 'Tus grupos')} <span class="count">${groups.length}</span></div>
         ${groups.length ? `<div class="group-list">${groups.map(card).join('')}</div>` : `
-          <div class="card empty">${T('Tu n’es dans aucun groupe pour l’instant.<br>Rejoins celui de tes potes avec leur code, ou crée le tien.', 'You’re not in any group yet.<br>Join your friends’ group with their code, or create your own.')}</div>`}
+          <div class="card empty">${T('Tu n’es dans aucun groupe pour l’instant.<br>Rejoins celui de tes potes avec leur code, ou crée le tien.', 'You’re not in any group yet.<br>Join your friends’ group with their code, or create your own.', 'Todavía no estás en ningún grupo.<br>Únete al de tus colegas con su código o crea el tuyo.')}</div>`}
         <div class="row lobby-actions">
-          <button class="btn btn-main" id="joinBtn">${T('Rejoindre un groupe', 'Join a group')}</button>
-          <button class="btn btn-soft" id="createBtn">${T('Créer un groupe', 'Create a group')}</button>
+          <button class="btn btn-main" id="joinBtn">${T('Rejoindre un groupe', 'Join a group', 'Unirme a un grupo')}</button>
+          <button class="btn btn-soft" id="createBtn">${T('Créer un groupe', 'Create a group', 'Crear un grupo')}</button>
         </div>
 
-        <div class="card account-card">
-          <div class="card-title">${T('Mon compte', 'My account')}</div>
-          <div class="acc-row"><span class="muted">${T('Identifiant', 'Username')}</span><span class="acc-val"><b>${esc(acc.username || '—')}</b>${acc.username ? `<button class="icon-btn" id="userBtn" aria-label="${T('Modifier', 'Edit')}">${icon('edit')}</button>` : ''}</span></div>
-          <div class="acc-row"><span class="muted">PIN</span><span class="acc-val">${acc.hasPin ? '••••' : `<span class="muted">${T('aucun', 'none')}</span>`}</span></div>
-          ${acc.hasPin ? '' : `<p class="field-hint">${T('Ajoute un PIN pour pouvoir te connecter sur un autre téléphone (avec ton identifiant).', 'Add a PIN so you can log in on another phone (with your username).')}</p>`}
-          <div class="acc-row"><span class="muted">${T('Langue', 'Language')}</span>${langSwitch()}</div>
-          <div class="row">
-            <button class="btn btn-soft" id="pinBtn">${acc.hasPin ? T('Changer de PIN', 'Change PIN') : T('Ajouter un PIN', 'Add a PIN')}</button>
-            <button class="btn btn-soft" id="logoutBtn">${T('Se déconnecter', 'Log out')}</button>
-          </div>
-          <button class="link-btn lobby-link" id="linkBtn">${T('J’ai un autre groupe avec un compte d’avant la mise à jour', 'I have another group with an account from before the update')}</button>
-        </div>
         ${aboutLinks()}
+        <div class="card account-card">
+          <div class="card-title">${T('Mon compte', 'My account', 'Mi cuenta')}</div>
+          <div class="acc-row"><span class="muted">${T('Identifiant', 'Username', 'Usuario')}</span><span class="acc-val"><b>${esc(acc.username || '—')}</b>${acc.username ? `<button class="icon-btn" id="userBtn" aria-label="${T('Modifier', 'Edit', 'Editar')}">${icon('edit')}</button>` : ''}</span></div>
+          <div class="acc-row"><span class="muted">PIN</span><span class="acc-val">${acc.hasPin ? '••••' : `<span class="muted">${T('aucun', 'none', 'ninguno')}</span>`}</span></div>
+          ${acc.hasPin ? '' : `<p class="field-hint">${T('Ajoute un PIN pour pouvoir te connecter sur un autre téléphone (avec ton identifiant).', 'Add a PIN so you can log in on another phone (with your username).', 'Añade un PIN para poder entrar desde otro móvil (con tu usuario).')}</p>`}
+          <div class="acc-row"><span class="muted">${T('Langue', 'Language', 'Idioma')}</span>${langSwitch()}</div>
+          <div class="row">
+            <button class="btn btn-soft" id="pinBtn">${acc.hasPin ? T('Changer de PIN', 'Change PIN', 'Cambiar PIN') : T('Ajouter un PIN', 'Add a PIN', 'Añadir un PIN')}</button>
+            <button class="btn btn-soft" id="logoutBtn">${T('Se déconnecter', 'Log out', 'Cerrar sesión')}</button>
+          </div>
+          <button class="link-btn lobby-link" id="linkBtn">${T('J’ai un autre groupe avec un compte d’avant la mise à jour', 'I have another group with an account from before the update', 'Tengo otro grupo con una cuenta de antes de la actualización')}</button>
+        </div>
       </main>`;
 
     document.getElementById('themeBtn').onclick = () => setTheme(isDark() ? 'light' : 'dark');
@@ -732,7 +741,7 @@
     $app.querySelectorAll('[data-group]').forEach((b) => (b.onclick = () => enterGroup(b.dataset.group)));
     $app.querySelectorAll('[data-cancelclaim]').forEach((b) => action(b, async () => {
       const p = account.pending.find((x) => x.id === b.dataset.cancelclaim);
-      if (p && p.status === 'open' && !confirm(T('Annuler ta demande ?', 'Cancel your request?'))) return;
+      if (p && p.status === 'open' && !confirm(T('Annuler ta demande ?', 'Cancel your request?', '¿Cancelar tu solicitud?'))) return;
       account = await api('POST', `claims/${b.dataset.cancelclaim}/cancel`);
       renderLobby();
     }));
@@ -746,7 +755,7 @@
     bindAbout($app);
     if ($sheet.hidden) openPendingAbout();
     action(document.getElementById('logoutBtn'), async () => {
-      if (!acc.hasPin && groups.length && !confirm(T('Tu n’as pas de PIN : pour revenir, il faudra redemander ton nom à chaque groupe (et attendre qu’on valide). Ajoute plutôt un PIN avant. Te déconnecter quand même ?', 'You have no PIN: to come back, you’d have to ask each group for your name again (and wait for approval). Better add a PIN first. Log out anyway?'))) return;
+      if (!acc.hasPin && groups.length && !confirm(T('Tu n’as pas de PIN : pour revenir, il faudra redemander ton nom à chaque groupe (et attendre qu’on valide). Ajoute plutôt un PIN avant. Te déconnecter quand même ?', 'You have no PIN: to come back, you’d have to ask each group for your name again (and wait for approval). Better add a PIN first. Log out anyway?', 'No tienes PIN: para volver, tendrás que pedir tu nombre otra vez en cada grupo (y esperar a que te acepten). Mejor añade un PIN antes. ¿Cerrar sesión de todas formas?'))) return;
       try { await api('POST', 'logout'); } catch { /* déjà déconnecté */ }
       logoutLocal();
     });
@@ -842,37 +851,37 @@
     const draw = () => {
       const taken = roster ? roster.taken || [] : [];
       const claimWho = (p) => {
-        if (!p.isAdmin) return T('l’admin du groupe doit', 'the group admin has to');
-        return taken.length - 1 >= 2 ? T('2 membres du groupe doivent', '2 members of the group have to') : T('l’autre membre du groupe doit', 'the other member of the group has to');
+        if (!p.isAdmin) return T('l’admin du groupe doit', 'the group admin has to', 'el admin del grupo tiene que');
+        return taken.length - 1 >= 2 ? T('2 membres du groupe doivent', '2 members of the group have to', '2 miembros del grupo tienen que') : T('l’autre membre du groupe doit', 'the other member of the group has to', 'el otro miembro del grupo tiene que');
       };
       openSheet(`
-        <div class="sheet-head"><h2>${T('Rejoindre un groupe', 'Join a group')}</h2><button class="x" data-close>✕</button></div>
+        <div class="sheet-head"><h2>${T('Rejoindre un groupe', 'Join a group', 'Unirme a un grupo')}</h2><button class="x" data-close>✕</button></div>
         ${!roster ? `
-          <label for="jcode">${T('Code du groupe', 'Group code')}</label>
-          <input class="input code-input" id="jcode" autocapitalize="characters" autocomplete="off" maxlength="12" placeholder="${T('Demande-le à tes potes', 'Ask your friends for it')}" value="${esc(code)}">
-          <button class="btn btn-main btn-block" id="jNext">${T('Continuer →', 'Continue →')}</button>` : `
-          <div class="info">${T('Groupe', 'Group')} <b>${esc(roster.group.name)}</b> · <button type="button" class="link" id="jOther">${T('changer de code', 'use another code')}</button></div>
-          <label>${T('Qui es-tu ?', 'Who are you?')}</label>
+          <label for="jcode">${T('Code du groupe', 'Group code', 'Código del grupo')}</label>
+          <input class="input code-input" id="jcode" autocapitalize="characters" autocomplete="off" maxlength="12" placeholder="${T('Demande-le à tes potes', 'Ask your friends for it', 'Pídeselo a tus colegas')}" value="${esc(code)}">
+          <button class="btn btn-main btn-block" id="jNext">${T('Continuer →', 'Continue →', 'Continuar →')}</button>` : `
+          <div class="info">${T('Groupe', 'Group', 'Grupo')} <b>${esc(roster.group.name)}</b> · <button type="button" class="link" id="jOther">${T('changer de code', 'use another code', 'usar otro código')}</button></div>
+          <label>${T('Qui es-tu ?', 'Who are you?', '¿Quién eres?')}</label>
           ${roster.players.length ? `<div class="pick-grid">${roster.players.map((p) => `
             <button type="button" class="choice ${picked && picked.id === p.id ? 'picked' : ''}" data-pick="${p.id}">${avatar(p)}<span>${esc(p.name)}</span></button>`).join('')}</div>`
-            : `<div class="info">${T('Tous les noms sont déjà pris. Demande à l’admin d’ajouter le tien.', 'All names are taken. Ask the admin to add yours.')}</div>`}
+            : `<div class="info">${T('Tous les noms sont déjà pris. Demande à l’admin d’ajouter le tien.', 'All names are taken. Ask the admin to add yours.', 'Ya están todos los nombres cogidos. Pídele al admin que añada el tuyo.')}</div>`}
           ${picked ? `
-            <label for="jname">${T('Ton pseudo dans ce groupe (tu peux le changer)', 'Your name in this group (you can change it)')}</label>
+            <label for="jname">${T('Ton pseudo dans ce groupe (tu peux le changer)', 'Your name in this group (you can change it)', 'Tu nombre en este grupo (puedes cambiarlo)')}</label>
             <input class="input" id="jname" maxlength="24" value="${esc(name || picked.name)}">
-            <label>${T('Ta photo dans ce groupe', 'Your photo in this group')} <span class="muted">${T('(optionnel)', '(optional)')}</span></label>
+            <label>${T('Ta photo dans ce groupe', 'Your photo in this group', 'Tu foto en este grupo')} <span class="muted">${T('(optionnel)', '(optional)', '(opcional)')}</span></label>
             <button type="button" class="photo-pick" id="jPhoto">
               ${photoData ? `<span class="avatar lg has-photo" style="--pc:${esc(picked.color)}"><img src="${photoData}" alt=""></span>` : avatar({ ...picked, photo: null }, 'lg')}
-              <span>${photoData ? T('Changer la photo', 'Change photo') : T('Choisir une photo', 'Pick a photo')}<small class="muted">${T('Sinon, tu gardes cet animal', 'Or just keep this animal')}</small></span>
+              <span>${photoData ? T('Changer la photo', 'Change photo', 'Cambiar la foto') : T('Choisir une photo', 'Pick a photo', 'Elegir una foto')}<small class="muted">${T('Sinon, tu gardes cet animal', 'Or just keep this animal', 'Si no, te quedas con este animal')}</small></span>
             </button>
-            <button class="btn btn-main btn-block" id="jGo">${T('C’est parti', 'Let’s go')}</button>` : ''}
+            <button class="btn btn-main btn-block" id="jGo">${T('C’est parti', 'Let’s go', '¡Vamos!')}</button>` : ''}
           ${taken.length ? `
             <details class="taken-box" ${claim ? 'open' : ''}>
-              <summary>${T('Ton nom est déjà pris ? (compte perdu)', 'Your name is already taken? (lost account)')}</summary>
+              <summary>${T('Ton nom est déjà pris ? (compte perdu)', 'Your name is already taken? (lost account)', '¿Tu nombre ya está cogido? (cuenta perdida)')}</summary>
               <div class="pick-grid">${taken.map((p) => `
                 <button type="button" class="choice ${claim && claim.id === p.id ? 'picked' : ''}" data-claim="${p.id}">${avatar(p)}<span>${esc(p.name)}</span></button>`).join('')}</div>
               ${claim ? `
-                <div class="info">${T(`Tu es <b>${esc(claim.name)}</b> et tu as perdu ton compte (nouveau téléphone, app supprimée…) ? On envoie une demande : ${claimWho(claim)} confirmer que c’est bien toi. Tu retrouveras tout : votes, messages, photo.`, `You’re <b>${esc(claim.name)}</b> and lost your account (new phone, app deleted…)? We’ll send a request: ${claimWho(claim)} confirm it’s really you. You’ll get everything back: votes, messages, photo.`)}</div>
-                <button class="btn btn-main btn-block" id="jClaim">${T('Demander à récupérer ce nom', 'Ask to get this name back')}</button>` : ''}
+                <div class="info">${T(`Tu es <b>${esc(claim.name)}</b> et tu as perdu ton compte (nouveau téléphone, app supprimée…) ? On envoie une demande : ${claimWho(claim)} confirmer que c’est bien toi. Tu retrouveras tout : votes, messages, photo.`, `You’re <b>${esc(claim.name)}</b> and lost your account (new phone, app deleted…)? We’ll send a request: ${claimWho(claim)} confirm it’s really you. You’ll get everything back: votes, messages, photo.`, `¿Eres <b>${esc(claim.name)}</b> y has perdido tu cuenta (móvil nuevo, app borrada…)? Mandamos una solicitud y ${claimWho(claim)} confirmar que eres tú. Lo recuperas todo: votos, mensajes, foto.`)}</div>
+                <button class="btn btn-main btn-block" id="jClaim">${T('Demander à récupérer ce nom', 'Ask to get this name back', 'Recuperar este nombre')}</button>` : ''}
             </details>` : ''}`}`, (root) => {
         const next = root.querySelector('#jNext');
         if (next) {
@@ -910,7 +919,7 @@
           closeSheet();
           await loadAccount();
           renderLobby();
-          toast(T('Demande envoyée 👍 On te fait entrer dès que c’est validé.', 'Request sent 👍 You’ll be let in as soon as it’s approved.'));
+          toast(T('Demande envoyée 👍 On te fait entrer dès que c’est validé.', 'Request sent 👍 You’ll be let in as soon as it’s approved.', 'Solicitud enviada 👍 Entrarás en cuanto la aprueben.'));
         });
       });
     };
@@ -924,23 +933,23 @@
     let groupName = '';
     let name = '';
     const draw = () => openSheet(`
-      <div class="sheet-head"><h2>${T('Créer un groupe', 'Create a group')}</h2><button class="x" data-close>✕</button></div>
-      <div class="info">${T('👑 Tu seras l’admin : tu ajouteras ensuite les noms de tes potes, et tu auras un code à leur envoyer.', '👑 You’ll be the admin. Next, you’ll add your friends’ names and get a code to send them.')}</div>
-      <label for="cgroup">${T('Nom du groupe', 'Group name')}</label>
-      <input class="input" id="cgroup" maxlength="40" placeholder="${T('Ex : Les Bouffons', 'e.g. The Clowns')}" value="${esc(groupName)}">
-      <label for="cname">${T('Ton pseudo dans ce groupe', 'Your name in this group')}</label>
-      <input class="input" id="cname" maxlength="24" placeholder="${T('Ex : Nico', 'e.g. Nico')}" value="${esc(name)}">
-      <label>${T('Ta photo dans ce groupe', 'Your photo in this group')} <span class="muted">${T('(optionnel)', '(optional)')}</span></label>
+      <div class="sheet-head"><h2>${T('Créer un groupe', 'Create a group', 'Crear un grupo')}</h2><button class="x" data-close>✕</button></div>
+      <div class="info">${T('👑 Tu seras l’admin : tu ajouteras ensuite les noms de tes potes, et tu auras un code à leur envoyer.', '👑 You’ll be the admin. Next, you’ll add your friends’ names and get a code to send them.', '👑 Serás el admin: luego añadirás los nombres de tus colegas y tendrás un código para pasárselo.')}</div>
+      <label for="cgroup">${T('Nom du groupe', 'Group name', 'Nombre del grupo')}</label>
+      <input class="input" id="cgroup" maxlength="40" placeholder="${T('Ex : Les Bouffons', 'e.g. The Clowns', 'Ej.: Los Payasos')}" value="${esc(groupName)}">
+      <label for="cname">${T('Ton pseudo dans ce groupe', 'Your name in this group', 'Tu nombre en este grupo')}</label>
+      <input class="input" id="cname" maxlength="24" placeholder="${T('Ex : Nico', 'e.g. Nico', 'Ej.: Nico')}" value="${esc(name)}">
+      <label>${T('Ta photo dans ce groupe', 'Your photo in this group', 'Tu foto en este grupo')} <span class="muted">${T('(optionnel)', '(optional)', '(opcional)')}</span></label>
       <button type="button" class="photo-pick" id="cPhoto">
         ${photoData ? `<span class="avatar lg has-photo" style="--pc:#7b2ff7"><img src="${photoData}" alt=""></span>` : avatar({ id: 'me', color: '#7b2ff7', animal: 0, name: '' }, 'lg')}
-        <span>${photoData ? T('Changer la photo', 'Change photo') : T('Choisir une photo', 'Pick a photo')}<small class="muted">${T('Sinon, tu auras un animal', 'Or you’ll get an animal')}</small></span>
+        <span>${photoData ? T('Changer la photo', 'Change photo', 'Cambiar la foto') : T('Choisir une photo', 'Pick a photo', 'Elegir una foto')}<small class="muted">${T('Sinon, tu auras un animal', 'Or you’ll get an animal', 'Si no, te tocará un animal')}</small></span>
       </button>
-      <button class="btn btn-main btn-block" id="cGo">${T('Créer le groupe', 'Create the group')}</button>`, (root) => {
+      <button class="btn btn-main btn-block" id="cGo">${T('Créer le groupe', 'Create the group', 'Crear el grupo')}</button>`, (root) => {
       const keep = () => { groupName = root.querySelector('#cgroup').value; name = root.querySelector('#cname').value; };
       root.querySelector('#cPhoto').onclick = async () => { keep(); const d = await pickPhoto(); if (d) photoData = d; draw(); };
       action(root.querySelector('#cGo'), async () => {
         keep();
-        if (name.trim().length < 2) throw new Error(T('Choisis ton pseudo dans ce groupe', 'Pick your name in this group'));
+        if (name.trim().length < 2) throw new Error(T('Choisis ton pseudo dans ce groupe', 'Pick your name in this group', 'Elige tu nombre en este grupo'));
         await ensureAccount();
         const r = await api('POST', 'groups', { groupName, name, timezone: myTz });
         closeSheet();
@@ -962,18 +971,18 @@
   // Rattacher un groupe où on avait un compte d'avant la mise à jour (code + pseudo + PIN de ce groupe).
   function openLinkSheet() {
     openSheet(`
-      <div class="sheet-head"><h2>${T('Rattacher un groupe', 'Add a group')}</h2><button class="x" data-close>✕</button></div>
-      <p class="muted small" style="margin:0 0 10px">${T('Avant, il fallait un compte par groupe. Entre le code de l’autre groupe, ton pseudo et ton PIN de là-bas : il rejoint ce compte, avec tes votes et tes messages.', 'Before, you needed one account per group. Enter the other group’s code, your name and your PIN there: it moves into this account, with your votes and messages.')}</p>
-      <label for="lcode">${T('Code du groupe', 'Group code')}</label>
+      <div class="sheet-head"><h2>${T('Rattacher un groupe', 'Add a group', 'Vincular un grupo')}</h2><button class="x" data-close>✕</button></div>
+      <p class="muted small" style="margin:0 0 10px">${T('Avant, il fallait un compte par groupe. Entre le code de l’autre groupe, ton pseudo et ton PIN de là-bas : il rejoint ce compte, avec tes votes et tes messages.', 'Before, you needed one account per group. Enter the other group’s code, your name and your PIN there: it moves into this account, with your votes and messages.', 'Antes hacía falta una cuenta por grupo. Pon el código del otro grupo, tu nombre y tu PIN de allí: se añade a esta cuenta, con tus votos y tus mensajes.')}</p>
+      <label for="lcode">${T('Code du groupe', 'Group code', 'Código del grupo')}</label>
       <input class="input code-input" id="lcode" autocapitalize="characters" autocomplete="off" maxlength="12">
-      <label for="lname">${T('Ton pseudo dans ce groupe', 'Your name in that group')}</label>
+      <label for="lname">${T('Ton pseudo dans ce groupe', 'Your name in that group', 'Tu nombre en ese grupo')}</label>
       <input class="input" id="lname" maxlength="24">
-      ${pinField(T('Ton PIN dans ce groupe', 'Your PIN in that group'), 'lpin')}
-      <button class="btn btn-main btn-block" id="lGo">${T('Rattacher', 'Add it')}</button>`, (root) => {
+      ${pinField(T('Ton PIN dans ce groupe', 'Your PIN in that group', 'Tu PIN en ese grupo'), 'lpin')}
+      <button class="btn btn-main btn-block" id="lGo">${T('Rattacher', 'Add it', 'Vincular')}</button>`, (root) => {
       action(root.querySelector('#lGo'), async () => {
         const r = await api('POST', 'account/link', { code: root.querySelector('#lcode').value, name: root.querySelector('#lname').value, pin: root.querySelector('#lpin').value });
         closeSheet();
-        toast(T('Groupe rattaché à ton compte 👍', 'Group added to your account 👍'));
+        toast(T('Groupe rattaché à ton compte 👍', 'Group added to your account 👍', 'Grupo vinculado a tu cuenta 👍'));
         await loadAccount();
         syncPush(true);
         enterGroup(r.groupId);
@@ -985,16 +994,16 @@
   function openPinSheet() {
     const has = account.account.hasPin;
     openSheet(`
-      <div class="sheet-head"><h2>${has ? T('Changer de PIN', 'Change PIN') : T('Ajouter un PIN', 'Add a PIN')}</h2><button class="x" data-close>✕</button></div>
-      ${has ? '' : `<p class="muted small" style="margin:0 0 6px">${T(`Pour te connecter sur un autre téléphone : ton identifiant <b>${esc(account.account.username || '')}</b> + ce PIN.`, `To log in on another phone: your username <b>${esc(account.account.username || '')}</b> + this PIN.`)}</p>`}
-      ${has ? pinField(T('PIN actuel', 'Current PIN'), 'oldPin') : ''}
-      ${pinField(T('Nouveau PIN (4 à 6 chiffres)', 'New PIN (4 to 6 digits)'), 'newPin')}
-      <button class="btn btn-main btn-block" id="pGo">${T('Enregistrer', 'Save')}</button>`, (root) => {
+      <div class="sheet-head"><h2>${has ? T('Changer de PIN', 'Change PIN', 'Cambiar PIN') : T('Ajouter un PIN', 'Add a PIN', 'Añadir un PIN')}</h2><button class="x" data-close>✕</button></div>
+      ${has ? '' : `<p class="muted small" style="margin:0 0 6px">${T(`Pour te connecter sur un autre téléphone : ton identifiant <b>${esc(account.account.username || '')}</b> + ce PIN.`, `To log in on another phone: your username <b>${esc(account.account.username || '')}</b> + this PIN.`, `Para entrar desde otro móvil: tu usuario <b>${esc(account.account.username || '')}</b> + este PIN.`)}</p>`}
+      ${has ? pinField(T('PIN actuel', 'Current PIN', 'PIN actual'), 'oldPin') : ''}
+      ${pinField(T('Nouveau PIN (4 à 6 chiffres)', 'New PIN (4 to 6 digits)', 'PIN nuevo (de 4 a 6 cifras)'), 'newPin')}
+      <button class="btn btn-main btn-block" id="pGo">${T('Enregistrer', 'Save', 'Guardar')}</button>`, (root) => {
       action(root.querySelector('#pGo'), async () => {
         account = await api('PATCH', 'account', { oldPin: has ? root.querySelector('#oldPin').value : undefined, pin: root.querySelector('#newPin').value });
         cachePut('account', account);
         closeSheet();
-        toast(has ? T('PIN changé 👍', 'PIN changed 👍') : T('PIN ajouté 👍', 'PIN added 👍'));
+        toast(has ? T('PIN changé 👍', 'PIN changed 👍', 'PIN cambiado 👍') : T('PIN ajouté 👍', 'PIN added 👍', 'PIN añadido 👍'));
         if (!state) renderLobby();
       });
     });
@@ -1002,27 +1011,26 @@
 
   function openUsernameSheet() {
     openSheet(`
-      <div class="sheet-head"><h2>${T('Ton identifiant', 'Your username')}</h2><button class="x" data-close>✕</button></div>
-      <p class="muted small" style="margin:0 0 6px">${T('Il sert seulement à te connecter sur un autre téléphone (avec ton PIN). Dans les groupes, on voit ton pseudo.', 'It’s only used to log in on another phone (with your PIN). In groups, people see your name.')}</p>
+      <div class="sheet-head"><h2>${T('Ton identifiant', 'Your username', 'Tu usuario')}</h2><button class="x" data-close>✕</button></div>
+      <p class="muted small" style="margin:0 0 6px">${T('Il sert seulement à te connecter sur un autre téléphone (avec ton PIN). Dans les groupes, on voit ton pseudo.', 'It’s only used to log in on another phone (with your PIN). In groups, people see your name.', 'Solo sirve para entrar desde otro móvil (con tu PIN). En los grupos se ve tu nombre.')}</p>
       <input class="input" id="uName" maxlength="20" autocapitalize="none" spellcheck="false" value="${esc(account.account.username || '')}">
-      <p class="field-hint">${T('3 à 20 caractères : lettres, chiffres, . _ -', '3 to 20 characters: letters, numbers, . _ -')}</p>
-      <button class="btn btn-main btn-block" id="uGo">${T('Enregistrer', 'Save')}</button>`, (root) => {
+      <p class="field-hint">${T('3 à 20 caractères : lettres, chiffres, . _ -', '3 to 20 characters: letters, numbers, . _ -', 'De 3 a 20 caracteres: letras, números, . _ -')}</p>
+      <button class="btn btn-main btn-block" id="uGo">${T('Enregistrer', 'Save', 'Guardar')}</button>`, (root) => {
       action(root.querySelector('#uGo'), async () => {
         account = await api('PATCH', 'account', { username: root.querySelector('#uName').value.trim() });
         cachePut('account', account);
         save('username', account.account.username);
         closeSheet();
-        toast(T('Identifiant changé 👍', 'Username changed 👍'));
+        toast(T('Identifiant changé 👍', 'Username changed 👍', 'Usuario cambiado 👍'));
         if (!state) renderLobby();
       });
     });
   }
 
-  // Petit interrupteur FR / EN (écran de connexion et Moi).
+  // Petit interrupteur FR / EN / ES (écran de connexion, accueil et Moi).
   function langSwitch(cls = '') {
-    return `<div class="lang-switch ${cls}" role="group" aria-label="Langue / Language">
-      <button type="button" data-lang="fr" class="${LANG === 'fr' ? 'on' : ''}">FR</button>
-      <button type="button" data-lang="en" class="${LANG === 'en' ? 'on' : ''}">EN</button>
+    return `<div class="lang-switch ${cls}" role="group" aria-label="Langue / Language / Idioma">
+      ${LANGS.map((l) => `<button type="button" data-lang="${l}" class="${LANG === l ? 'on' : ''}">${l.toUpperCase()}</button>`).join('')}
     </div>`;
   }
   function bindLangSwitch(root, redraw) {
@@ -1037,40 +1045,40 @@
   // ---------- Invitation ----------
 
   function inviteLink() {
-    return `${location.origin}${L ? '/en/' : '/'}?code=${state.group.code}`;
+    return `${location.origin}${langLink(LANG)}?code=${state.group.code}`;
   }
 
   function showInvite(justCreated) {
-    const text = T(`Rejoins « ${state.group.name} » sur Qui de nous ?\nCode : ${state.group.code}\n${inviteLink()}`, `Join “${state.group.name}” on Which of us?\nCode: ${state.group.code}\n${inviteLink()}`);
+    const text = T(`Rejoins « ${state.group.name} » sur Qui de nous ?\nCode : ${state.group.code}\n${inviteLink()}`, `Join “${state.group.name}” on Which of us?\nCode: ${state.group.code}\n${inviteLink()}`, `Únete a «${state.group.name}» en ¿Quién de nosotros?\nCódigo: ${state.group.code}\n${inviteLink()}`);
     openSheet(`
-      <div class="sheet-head"><h2>${justCreated ? T('Groupe créé', 'Group created') : T('Inviter des potes', 'Invite your mates')}</h2><button class="x" data-close>✕</button></div>
-      <p class="muted" style="margin:0 0 6px">${T(`Envoie ce code (ou le lien) à tes potes pour qu’ils rejoignent <b>${esc(state.group.name)}</b>.`, `Send this code (or the link) to your mates so they can join <b>${esc(state.group.name)}</b>.`)}</p>
+      <div class="sheet-head"><h2>${justCreated ? T('Groupe créé', 'Group created', 'Grupo creado') : T('Inviter des potes', 'Invite your mates', 'Invitar a colegas')}</h2><button class="x" data-close>✕</button></div>
+      <p class="muted" style="margin:0 0 6px">${T(`Envoie ce code (ou le lien) à tes potes pour qu’ils rejoignent <b>${esc(state.group.name)}</b>.`, `Send this code (or the link) to your mates so they can join <b>${esc(state.group.name)}</b>.`, `Mándales este código (o el enlace) a tus colegas para que se unan a <b>${esc(state.group.name)}</b>.`)}</p>
       <div class="big-code">${esc(state.group.code)}</div>
       <div class="row">
-        <button class="btn btn-main" id="shareBtn">${navigator.share ? T('Partager', 'Share') : T('Copier le lien', 'Copy link')}</button>
-        <button class="btn btn-soft" id="copyCode">${T('Copier le code', 'Copy code')}</button>
+        <button class="btn btn-main" id="shareBtn">${navigator.share ? T('Partager', 'Share', 'Compartir') : T('Copier le lien', 'Copy link', 'Copiar enlace')}</button>
+        <button class="btn btn-soft" id="copyCode">${T('Copier le code', 'Copy code', 'Copiar código')}</button>
       </div>
-      <button class="link-btn" id="otherLang">${T('Des potes anglophones ? Copier le lien en anglais', 'Mates who speak French? Copy the French link')}</button>
-      ${justCreated ? `<div class="info" style="margin-top:14px">${T('👉 Ajoute d’abord les noms de tes potes dans <b>Admin → Les potes</b> : ils choisiront leur nom en rejoignant.', '👉 First add your mates’ names in <b>Admin → Your mates</b>: they’ll pick their name when joining.')}</div>` : ''}`, (root) => {
+      <p class="other-langs muted small">${T('Le lien dans une autre langue :', 'The link in another language:', 'El enlace en otro idioma:')} ${LANGS.filter((l) => l !== LANG).map((l) => `<button class="link-btn" data-langlink="${l}">${{ fr: 'Français', en: 'English', es: 'Español' }[l]}</button>`).join(' · ')}</p>
+      ${justCreated ? `<div class="info" style="margin-top:14px">${T('👉 Ajoute d’abord les noms de tes potes dans <b>Admin → Les potes</b> : ils choisiront leur nom en rejoignant.', '👉 First add your mates’ names in <b>Admin → Your mates</b>: they’ll pick their name when joining.', '👉 Primero añade los nombres de tus colegas en <b>Admin → Los colegas</b>: elegirán su nombre al unirse.')}</div>` : ''}`, (root) => {
       const copy = async (t, msg) => {
         try {
           await navigator.clipboard.writeText(t);
           toast(msg);
         } catch {
-          prompt(T('Copie ça :', 'Copy this:'), t);
+          prompt(T('Copie ça :', 'Copy this:', 'Copia esto:'), t);
         }
       };
-      root.querySelector('#copyCode').onclick = () => copy(state.group.code, T('Code copié', 'Code copied'));
-      root.querySelector('#otherLang').onclick = () => copy(`${location.origin}${L ? '/' : '/en/'}?code=${state.group.code}`, T('Lien en anglais copié', 'French link copied'));
+      root.querySelector('#copyCode').onclick = () => copy(state.group.code, T('Code copié', 'Code copied', 'Código copiado'));
+      root.querySelectorAll('[data-langlink]').forEach((b) => (b.onclick = () => copy(`${location.origin}${langLink(b.dataset.langlink)}?code=${state.group.code}`, T('Lien copié', 'Link copied', 'Enlace copiado'))));
       root.querySelector('#shareBtn').onclick = async () => {
         if (navigator.share) {
-          try { await navigator.share({ title: T('Qui de nous ?', 'Which of us?'), text }); } catch { /* annulé */ }
-        } else copy(text, T('Invitation copiée', 'Invite copied'));
+          try { await navigator.share({ title: T('Qui de nous ?', 'Which of us?', '¿Quién de nosotros?'), text }); } catch { /* annulé */ }
+        } else copy(text, T('Invitation copiée', 'Invite copied', 'Invitación copiada'));
       };
     });
   }
 
-  function pinField(label = T('PIN secret (4 à 6 chiffres)', 'Secret PIN (4 to 6 digits)'), id = 'pin') {
+  function pinField(label = T('PIN secret (4 à 6 chiffres)', 'Secret PIN (4 to 6 digits)', 'PIN secreto (de 4 a 6 cifras)'), id = 'pin') {
     return `
       <label for="${id}">${label}</label>
       <input class="input" id="${id}" required inputmode="numeric" pattern="\\d{4,6}" maxlength="6" type="password" placeholder="••••" autocomplete="current-password">`;
@@ -1120,6 +1128,7 @@
       if (pendingRecap) openRecapFromLink();
       if ($sheet.hidden) openPendingAbout();
       checkClaims();
+      quizPrompt();
     } catch (e) {
       if (token) toast(e.message);
     }
@@ -1218,9 +1227,9 @@
     if (!document.getElementById('view')) {
       $app.innerHTML = `
         <header class="top">
-          <button class="lobby-btn" id="lobbyBtn" aria-label="${T('Mes groupes', 'My groups')}">${icon('back')}</button>
+          <button class="lobby-btn" id="lobbyBtn" aria-label="${T('Mes groupes', 'My groups', 'Mis grupos')}">${icon('back')}</button>
           <h1 id="groupTitle"></h1>
-          <button class="streak-chip" id="streakChip" aria-label="${T('Séries', 'Streaks')}"></button>
+          <button class="streak-chip" id="streakChip" aria-label="${T('Séries', 'Streaks', 'Rachas')}"></button>
           <button class="theme-btn" id="themeBtn" role="switch"></button>
           <button class="me-chip" id="meChip"></button>
         </header>
@@ -1251,7 +1260,7 @@
       ['sets', 'sets', 'Sets', 0],
       ['stats', 'stats', 'Stats', 0],
       ...(state.settings.profiles ? [['quiz', 'quiz', 'Quiz', state.me.quizDone ? 0 : '!']] : []),
-      ['me', 'me', T('Moi', 'Me'), 0],
+      ['me', 'me', T('Moi', 'Me', 'Yo'), 0],
     ];
     const chip = document.getElementById('streakChip');
     if (chip && state.streaks) {
@@ -1268,7 +1277,7 @@
         </button>`)
       .join('');
     nav.querySelectorAll('[data-tab]').forEach((b) => (b.onclick = () => go(b.dataset.tab)));
-    const name = T('Qui de nous ?', 'Which of us?');
+    const name = T('Qui de nous ?', 'Which of us?', '¿Quién de nosotros?');
     document.title = n + unread ? `(${n + unread}) ${name}` : name;
     if (navigator.setAppBadge) navigator.setAppBadge(n + unread).catch(() => {});
   }
@@ -1282,7 +1291,7 @@
     if (!b) return;
     b.classList.toggle('on', isDark());
     b.setAttribute('aria-checked', String(isDark()));
-    b.setAttribute('aria-label', isDark() ? T('Passer en mode clair', 'Switch to light mode') : T('Passer en mode sombre', 'Switch to dark mode'));
+    b.setAttribute('aria-label', isDark() ? T('Passer en mode clair', 'Switch to light mode', 'Pasar a modo claro') : T('Passer en mode sombre', 'Switch to dark mode', 'Pasar a modo oscuro'));
     b.innerHTML = '<span class="theme-knob">' + icon(isDark() ? 'moon' : 'sun') + '</span>';
   }
 
@@ -1329,7 +1338,7 @@
     const by = p.droppedBy ? player(p.droppedBy) : null;
     const hasMenu = (!p.ended && p.myVote) || state.me.isAdmin || p.mine;
     const comments = (p.chat && p.chat.count) || 0;
-    const me_ = (u) => (u.id === state.me.playerId ? T('Toi', 'You') : u.name);
+    const me_ = (u) => (u.id === state.me.playerId ? T('Toi', 'You', 'Tú') : u.name);
 
     let body;
     if (voting) {
@@ -1341,18 +1350,18 @@
         const picked = !half && p.myVote && votedFor(p.myVote, u.id);
         return `
           <button class="vote-opt ${extra} ${picked ? 'picked' : ''} ${inHalf ? 'half-on' : ''}" data-vote="${p.id}" data-target="${u.id}">
-            ${u.id === 'nobody' ? '<span class="avatar sm nobody-av">∅</span>' : avatar(u, 'sm')}<span>${esc(u.id === state.me.playerId ? u.name + T(' (moi)', ' (me)') : u.name)}</span>
+            ${u.id === 'nobody' ? '<span class="avatar sm nobody-av">∅</span>' : avatar(u, 'sm')}<span>${esc(u.id === state.me.playerId ? u.name + T(' (moi)', ' (me)', ' (yo)') : u.name)}</span>
             ${inHalf ? '<i class="half-mark">½</i>' : ''}
           </button>`;
       };
       body = `<div class="vote-list">${state.players.map((u) => opt(u)).join('')}${p.nobody ? opt(player('nobody'), 'nobody') : ''}</div>
         <div class="half-row ${half ? 'on' : ''}">
           ${half
-            ? `<span class="half-hint">${half.length ? T('Une 2e personne ? Ou valide ton ½ seul', 'A 2nd person? Or send just your ½') : T('Choisis 1 ou 2 personnes : ½ vote chacune', 'Pick 1 or 2 people: ½ vote each')}</span>
-               ${half.length ? `<button class="half-send" data-halfsend="${p.id}">${T('Valider ½', 'Send ½')}</button>` : ''}
-               <button class="half-cancel" data-halfcancel="${p.id}">${T('Annuler', 'Cancel')}</button>`
-            : `<button class="half-toggle" data-half="${p.id}" title="${T('Pas sûr·e ? Partage ton vote en deux', 'Not sure? Split your vote in two')}">½ ${T('J’hésite', 'Not sure')}</button>`}
-          ${editing === p.id && !half ? `<button class="link-btn" data-cancel>${T('Annuler', 'Cancel')}</button>` : ''}
+            ? `<span class="half-hint">${half.length ? T('Une 2e personne ? Ou valide ton ½ seul', 'A 2nd person? Or send just your ½', '¿Otra persona? O vota solo tu ½') : T('Choisis 1 ou 2 personnes : ½ vote chacune', 'Pick 1 or 2 people: ½ vote each', 'Elige 1 o 2 personas: ½ voto a cada una')}</span>
+               ${half.length ? `<button class="half-send" data-halfsend="${p.id}">${T('Valider ½', 'Send ½', 'Votar ½')}</button>` : ''}
+               <button class="half-cancel" data-halfcancel="${p.id}">${T('Annuler', 'Cancel', 'Cancelar')}</button>`
+            : `<button class="half-toggle" data-half="${p.id}" title="${T('Pas sûr·e ? Partage ton vote en deux', 'Not sure? Split your vote in two', '¿No lo tienes claro? Reparte tu voto entre dos')}">½ ${T('J’hésite', 'Not sure', 'Dudo')}</button>`}
+          ${editing === p.id && !half ? `<button class="link-btn" data-cancel>${T('Annuler', 'Cancel', 'Cancelar')}</button>` : ''}
         </div>`;
     } else {
       // Résultats façon AskUs : la plus grande barre prend toute la largeur, les autres sont à l'échelle.
@@ -1382,20 +1391,20 @@
                 </div>`;
             })
             .join('')}</div>`
-        : `<p class="muted small" style="margin:0">${T('Personne n’a voté.', 'Nobody voted.')}</p>`;
+        : `<p class="muted small" style="margin:0">${T('Personne n’a voté.', 'Nobody voted.', 'Nadie ha votado.')}</p>`;
       body += consensusLine(p) + rateRow(p);
     }
 
-    const status = p.ended ? `<span class="poll-ended">${T('Terminé', 'Over')}</span>` : timeLeft(p);
+    const status = p.ended ? `<span class="poll-ended">${T('Terminé', 'Over', 'Terminada')}</span>` : timeLeft(p);
     const author = p.custom && p.authorId ? player(p.authorId) : null;
     const picked = opts.justVoted && p.myVote ? (Array.isArray(p.myVote) ? p.myVote.map(player) : [player(p.myVote)]) : null;
-    const pickedNames = picked && picked.map((u) => (u.id === state.me.playerId ? T('pour toi', 'for yourself') : u.name));
+    const pickedNames = picked && picked.map((u) => (u.id === state.me.playerId ? T('pour toi', 'for yourself', 'para ti') : u.name));
     return `
       <article class="card poll ${voting && !p.myVote ? 'todo' : ''} ${p.custom ? 'custom' : ''} ${opts.justVoted ? 'just-voted' : ''} ${voting && halfPick && halfPick.pollId === p.id ? 'halfmode' : ''}" data-poll="${p.id}">
-        ${p.custom ? `<div class="custom-tag">${icon('pen')}<span>${T('Question de', 'Question by')} <b>${author ? esc(author.name) : T('quelqu’un du groupe', 'someone in the group')}</b></span></div>` : ''}
+        ${p.custom ? `<div class="custom-tag">${icon('pen')}<span>${T('Question de', 'Question by', 'Pregunta de')} <b>${author ? esc(author.name) : T('quelqu’un du groupe', 'someone in the group', 'alguien del grupo')}</b></span></div>` : ''}
         ${picked ? `<div class="voted-banner">${icon('check')}<span>${Array.isArray(p.myVote)
-          ? T(`Tu as voté ½ <b>${pickedNames.map(esc).join('</b> et ½ <b>')}</b>`, `You voted ½ <b>${pickedNames.map(esc).join('</b> and ½ <b>')}</b>`)
-          : T(`Tu as voté <b>${esc(pickedNames[0])}</b>`, `You voted <b>${esc(pickedNames[0])}</b>`)}</span></div>` : ''}
+          ? T(`Tu as voté ½ <b>${pickedNames.map(esc).join('</b> et ½ <b>')}</b>`, `You voted ½ <b>${pickedNames.map(esc).join('</b> and ½ <b>')}</b>`, `Has votado ½ a <b>${pickedNames.map(esc).join('</b> y ½ a <b>')}</b>`)
+          : T(`Tu as voté <b>${esc(pickedNames[0])}</b>`, `You voted <b>${esc(pickedNames[0])}</b>`, `Has votado a <b>${esc(pickedNames[0])}</b>`)}</span></div>` : ''}
         <div class="poll-head" ${opts.collapsible ? `data-toggle="${p.id}" role="button" aria-expanded="true"` : ''}>
           <div class="poll-top">
             <span class="poll-set ${s.spicy ? 'spicy' : ''}">${esc(setName(s))}${s.spicy ? ' · 18+' : ''}</span>
@@ -1407,10 +1416,10 @@
         <div class="poll-foot">
           <span class="foot-info">
             ${voterStack(p.voterIds.map(player), 5)}<span class="vote-count">${total}/${members()}</span>
-            ${by && !(author && author.id === by.id) ? `<span class="by">· ${T('par', 'by')} ${esc(by.name)}</span>` : ''}
+            ${by && !(author && author.id === by.id) ? `<span class="by">· ${T('par', 'by', 'por')} ${esc(by.name)}</span>` : ''}
           </span>
           <span class="foot-actions">
-            ${comments || (p.chat && p.chat.locked) ? '' : `<button class="more-btn" data-chat="${p.id}" aria-label="${T('Commenter', 'Comment')}">${icon('comment')}</button>`}
+            ${comments || (p.chat && p.chat.locked) ? '' : `<button class="more-btn" data-chat="${p.id}" aria-label="${T('Commenter', 'Comment', 'Comentar')}">${icon('comment')}</button>`}
             ${hasMenu ? `<button class="more-btn" data-more="${p.id}" aria-label="Options">${icon('more')}</button>` : ''}
           </span>
         </div>
@@ -1424,9 +1433,9 @@
     if (!c) return '';
     if (c.kind === 'unanimous') {
       const u = player(c.target);
-      return `<div class="cons-line">👑 ${T(`Unanimité ${c.n}/${c.n} pour <b>${esc(u.id === state.me.playerId ? 'toi' : u.name)}</b>`, `Unanimous ${c.n}/${c.n} for <b>${esc(u.id === state.me.playerId ? 'you' : u.name)}</b>`)}</div>`;
+      return `<div class="cons-line">👑 ${T(`Unanimité ${c.n}/${c.n} pour <b>${esc(u.id === state.me.playerId ? 'toi' : u.name)}</b>`, `Unanimous ${c.n}/${c.n} for <b>${esc(u.id === state.me.playerId ? 'you' : u.name)}</b>`, `Unanimidad ${c.n}/${c.n} para <b>${esc(u.id === state.me.playerId ? 'ti' : u.name)}</b>`)}</div>`;
     }
-    return `<div class="cons-line split">🌪️ ${T('Personne n’est d’accord', 'Nobody agrees')}</div>`;
+    return `<div class="cons-line split">🌪️ ${T('Personne n’est d’accord', 'Nobody agrees', 'Nadie se pone de acuerdo')}</div>`;
   }
 
   // Note de la question (étoiles) : discrète, sous les résultats. Gardée pour les stats et les futures questions.
@@ -1435,7 +1444,7 @@
     const r = p.rating;
     return `
       <div class="rate-row">
-        <span class="rate-label">${r.mine ? T('Ta note', 'Your rating') : T('Note la question', 'Rate this question')}</span>
+        <span class="rate-label">${r.mine ? T('Ta note', 'Your rating', 'Tu nota') : T('Note la question', 'Rate this question', 'Puntúa la pregunta')}</span>
         <span class="stars">${[1, 2, 3, 4, 5].map((n) => `<button class="star ${r.mine && n <= r.mine ? 'on' : ''}" data-rate="${p.id}" data-n="${n}" aria-label="${n}/5">★</button>`).join('')}</span>
         ${r.n ? `<span class="rate-avg">${String(r.avg).replace('.', L ? '.' : ',')} · ${r.n}</span>` : ''}
       </div>`;
@@ -1455,19 +1464,19 @@
     const bars = leaders.slice(0, 2).map((u) => `
       <span class="mini-res" style="--pc:${esc(u.color)}">
         ${avatar(u, 'xs')}
-        <span class="mr-name">${esc(Array.from(u.id === state.me.playerId ? T('Toi', 'You') : u.name).slice(0, 8).join(''))}</span>
+        <span class="mr-name">${esc(Array.from(u.id === state.me.playerId ? T('Toi', 'You', 'Tú') : u.name).slice(0, 8).join(''))}</span>
         <span class="mini-track"><span class="mini-fill" style="width:${((max / total) * 100).toFixed(1)}%"></span></span>
         <span class="mr-n">${num(max)}</span>
-      </span>`).join('') + (leaders.length > 2 ? `<span class="tie-more">+${leaders.length - 2} ${T('ex æquo', 'tied')}</span>` : '');
+      </span>`).join('') + (leaders.length > 2 ? `<span class="tie-more">+${leaders.length - 2} ${T('ex æquo', 'tied', 'empatados')}</span>` : '');
     return `
       <button class="prow ${p.custom ? 'custom' : ''} ${flashId === p.id ? 'flash' : ''}" data-toggle="${p.id}" aria-expanded="false">
         <span class="prow-top">
-          <span class="prow-q">${author ? `<span class="prow-pen" title="${T('Question de', 'Question by')} ${esc(author.name)}">${icon('pen')}</span>` : ''}${esc(qText(p))}</span>
+          <span class="prow-q">${author ? `<span class="prow-pen" title="${T('Question de', 'Question by', 'Pregunta de')} ${esc(author.name)}">${icon('pen')}</span>` : ''}${esc(qText(p))}</span>
           ${c.count ? `<span class="prow-chat ${c.unread ? 'new' : ''}">${icon('comment')}${c.unread || c.count}</span>` : ''}
         </span>
         <span class="prow-res ${leaders.length > 1 ? 'tie' : ''}">
-          <span class="mini-bars">${bars || `<span class="muted small">${T('Aucun vote', 'No votes')}</span>`}</span>
-          <span class="prow-side">${cons ? `<span class="cons-dot ${cons.kind}" title="${cons.kind === 'unanimous' ? T('Unanimité', 'Unanimous') : T('Personne d’accord', 'Nobody agrees')}">${cons.kind === 'unanimous' ? '👑' : '🌪️'}</span>` : ''}${p.ended ? '' : timeLeft(p)}<span class="vote-count">${p.voterIds.length}/${members()}</span></span>
+          <span class="mini-bars">${bars || `<span class="muted small">${T('Aucun vote', 'No votes', 'Sin votos')}</span>`}</span>
+          <span class="prow-side">${cons ? `<span class="cons-dot ${cons.kind}" title="${cons.kind === 'unanimous' ? T('Unanimité', 'Unanimous', 'Unanimidad') : T('Personne d’accord', 'Nobody agrees', 'Nadie de acuerdo')}">${cons.kind === 'unanimous' ? '👑' : '🌪️'}</span>` : ''}${p.ended ? '' : timeLeft(p)}<span class="vote-count">${p.voterIds.length}/${members()}</span></span>
         </span>
       </button>`;
   }
@@ -1493,7 +1502,7 @@
     const C = 2 * Math.PI * 6;
     const m = Math.round(ms / 60000);
     const label = m >= 60 ? `${Math.floor(m / 60)}h` : `${m} min`;
-    return `<span class="tleft ${frac < 0.15 ? 'soon' : ''}" title="${T('Encore', 'Still')} ${left(p.endsAt)}">
+    return `<span class="tleft ${frac < 0.15 ? 'soon' : ''}" title="${T('Encore', 'Still', 'Quedan')} ${left(p.endsAt)}">
       <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6" class="tl-track"/><circle cx="8" cy="8" r="6" class="tl-fill" stroke-dasharray="${C.toFixed(2)}" stroke-dashoffset="${(C * (1 - frac)).toFixed(2)}"/></svg>${label}</span>`;
   }
 
@@ -1504,9 +1513,9 @@
 
   // Aperçu d'un message en une ligne (« GIF », « Photo », ou le texte).
   function msgSnippet(m) {
-    if (m.deleted) return `<i>${T('supprimé', 'deleted')}</i>`;
+    if (m.deleted) return `<i>${T('supprimé', 'deleted', 'borrado')}</i>`;
     if (m.kind === 'gif') return 'GIF';
-    if (m.kind === 'image') return `📷 ${T('Photo', 'Photo')}`;
+    if (m.kind === 'image') return `📷 ${T('Photo', 'Photo', 'Foto')}`;
     return esc(m.text);
   }
 
@@ -1514,13 +1523,13 @@
     const c = p.chat || { count: 0, unread: 0, last: [] };
     if (c.locked) {
       return c.count
-        ? `<div class="poll-chat locked"><span class="pc-ico">${icon('lock')}</span><span class="pc-body muted">${plural(c.count, T('commentaire', 'comment'))} · ${T('vote pour les voir', 'vote to see them')}</span></div>`
+        ? `<div class="poll-chat locked"><span class="pc-ico">${icon('lock')}</span><span class="pc-body muted">${plural(c.count, T('commentaire', 'comment', 'comentario'))} · ${T('vote pour les voir', 'vote to see them', 'vota para verlos')}</span></div>`
         : '';
     }
     if (!c.count) return '';
     const lines = c.last.map((m) => {
       const u = player(m.playerId);
-      const who = m.playerId === state.me.playerId ? T('Toi', 'You') : esc(u.name);
+      const who = m.playerId === state.me.playerId ? T('Toi', 'You', 'Tú') : esc(u.name);
       return `<span class="pc-msg"><b class="pname" style="--pc:${esc(u.color)}">${who}</b> ${msgSnippet(m)}</span>`;
     }).join('');
     return `
@@ -1536,22 +1545,22 @@
     if (!p) return;
     const canDelete = state.me.isAdmin || p.mine;
     openSheet(`
-      <div class="sheet-head"><h2>Options</h2><button class="x" data-close>✕</button></div>
+      <div class="sheet-head"><h2>${T('Options', 'Options', 'Opciones')}</h2><button class="x" data-close>✕</button></div>
       <p class="muted" style="margin:0 0 12px">${esc(qText(p))}</p>
       <div class="menu-list">
-        ${!p.ended && p.myVote ? `<button class="menu-item" id="mEdit">${T('Changer mon vote', 'Change my vote')}</button>` : ''}
-        ${canDelete ? `<button class="menu-item danger" id="mDel">${T('Supprimer le sondage', 'Delete the poll')}</button>` : ''}
+        ${!p.ended && p.myVote ? `<button class="menu-item" id="mEdit">${T('Changer mon vote', 'Change my vote', 'Cambiar mi voto')}</button>` : ''}
+        ${canDelete ? `<button class="menu-item danger" id="mDel">${T('Supprimer le sondage', 'Delete the poll', 'Borrar la pregunta')}</button>` : ''}
       </div>`, (root) => {
       const ed = root.querySelector('#mEdit');
       if (ed) ed.onclick = () => { closeSheet(); editing = id; halfPick = null; renderView(); };
       action(root.querySelector('#mDel'), async () => {
-        if (!confirm(T('Supprimer ce sondage pour tout le monde ?', 'Delete this poll for everyone?'))) return;
+        if (!confirm(T('Supprimer ce sondage pour tout le monde ?', 'Delete this poll for everyone?', '¿Borrar esta pregunta para todo el mundo?'))) return;
         await api('DELETE', `polls/${id}`);
         closeSheet();
         state.live = state.live.filter((x) => x.id !== id);
         state.archive = state.archive.filter((x) => x.id !== id);
         if (archiveExtra) archiveExtra.items = archiveExtra.items.filter((x) => x.id !== id);
-        toast(T('Sondage supprimé', 'Poll deleted'));
+        toast(T('Sondage supprimé', 'Poll deleted', 'Pregunta borrada'));
         renderMain();
       });
     });
@@ -1669,7 +1678,7 @@
   // 3) elle se replie en douceur et rejoint « Déjà voté », où sa ligne brille un instant.
   async function castVote(card, id, body, chosen) {
     if (animating || !card) return;
-    if (stale) return toast(T('Un instant, mise à jour…', 'One sec, updating…'));
+    if (stale) return toast(T('Un instant, mise à jour…', 'One sec, updating…', 'Un momento, actualizando…'));
     const firstVote = !(findPoll(id) || {}).myVote;
     animating = true;
     card.querySelectorAll('[data-vote], .half-row button').forEach((x) => (x.disabled = true));
@@ -1728,8 +1737,8 @@
     return claimsForMe().map((c) => {
       const p = player(c.playerId);
       return `<button class="claim-banner ${c.aboutMe ? 'warn' : ''}" data-claimopen="${c.id}">${avatar(p, 'sm')}<span>${c.aboutMe
-        ? T('Quelqu’un demande à récupérer <b>ton</b> nom', 'Someone is asking for <b>your</b> name')
-        : T(`<b>${esc(p.name)}</b> a perdu son compte et demande à revenir`, `<b>${esc(p.name)}</b> lost their account and wants back in`)}</span>${icon('key')}</button>`;
+        ? T('Quelqu’un demande à récupérer <b>ton</b> nom', 'Someone is asking for <b>your</b> name', 'Alguien pide recuperar <b>tu</b> nombre')
+        : T(`<b>${esc(p.name)}</b> a perdu son compte et demande à revenir`, `<b>${esc(p.name)}</b> lost their account and wants back in`, `<b>${esc(p.name)}</b> ha perdido su cuenta y pide volver`)}</span>${icon('key')}</button>`;
     }).join('');
   }
 
@@ -1747,26 +1756,26 @@
     const by = c.approvals.map(player);
     const canOk = c.canApprove && !c.approvals.includes(state.me.playerId);
     openSheet(`
-      <div class="sheet-head"><h2>${c.aboutMe ? T('⚠️ On demande ton nom', '⚠️ Someone wants your name') : T('🔑 Compte perdu', '🔑 Lost account')}</h2><button class="x" data-close>✕</button></div>
+      <div class="sheet-head"><h2>${c.aboutMe ? T('⚠️ On demande ton nom', '⚠️ Someone wants your name', '⚠️ Alguien pide tu nombre') : T('🔑 Compte perdu', '🔑 Lost account', '🔑 Cuenta perdida')}</h2><button class="x" data-close>✕</button></div>
       <div class="claim-who">${avatar(p, 'lg')}<b>${esc(p.name)}</b></div>
       <p class="muted">${c.aboutMe
-        ? T('Quelqu’un dit être toi et avoir perdu son compte. Si ce n’est pas toi, refuse : la demande s’arrête là.', 'Someone says they’re you and lost their account. If it isn’t you, deny it: the request stops there.')
-        : T(`Quelqu’un dit être <b>${esc(p.name)}</b> et avoir perdu son compte (nouveau téléphone, app supprimée…). Valide seulement si tu es sûr·e que c’est bien lui/elle : demande-lui en vrai !`, `Someone says they’re <b>${esc(p.name)}</b> and lost their account (new phone, app deleted…). Only approve if you’re sure it’s really them: ask them in real life!`)}</p>
-      ${c.needed > 1 ? `<p class="small muted">${T(`Il faut ${c.needed} validations`, `It needs ${c.needed} approvals`)} : ${c.approvals.length}/${c.needed}${by.length ? ' · ' + by.map((u) => esc(u.name)).join(', ') : ''}</p>` : ''}
+        ? T('Quelqu’un dit être toi et avoir perdu son compte. Si ce n’est pas toi, refuse : la demande s’arrête là.', 'Someone says they’re you and lost their account. If it isn’t you, deny it: the request stops there.', 'Alguien dice ser tú y haber perdido la cuenta. Si no eres tú, recházala y ahí se acaba.')
+        : T(`Quelqu’un dit être <b>${esc(p.name)}</b> et avoir perdu son compte (nouveau téléphone, app supprimée…). Valide seulement si tu es sûr·e que c’est bien lui/elle : demande-lui en vrai !`, `Someone says they’re <b>${esc(p.name)}</b> and lost their account (new phone, app deleted…). Only approve if you’re sure it’s really them: ask them in real life!`, `Alguien dice ser <b>${esc(p.name)}</b> y haber perdido su cuenta (móvil nuevo, app borrada…). Valida solo si tienes claro que es quien dice: ¡pregúntale en persona!`)}</p>
+      ${c.needed > 1 ? `<p class="small muted">${T(`Il faut ${c.needed} validations`, `It needs ${c.needed} approvals`, `Hacen falta ${c.needed} confirmaciones`)} : ${c.approvals.length}/${c.needed}${by.length ? ' · ' + by.map((u) => esc(u.name)).join(', ') : ''}</p>` : ''}
       <div class="row">
-        <button class="btn btn-soft" id="clDeny">${c.aboutMe ? T('Pas moi : refuser', 'Not me: deny') : T('Refuser', 'Deny')}</button>
-        ${canOk ? `<button class="btn btn-main" id="clOk">${T('C’est bien lui/elle', 'It’s really them')}</button>` : `<button class="btn btn-main" data-close>${T('Plus tard', 'Later')}</button>`}
+        <button class="btn btn-soft" id="clDeny">${c.aboutMe ? T('Pas moi : refuser', 'Not me: deny', 'No soy yo: rechazar') : T('Refuser', 'Deny', 'Rechazar')}</button>
+        ${canOk ? `<button class="btn btn-main" id="clOk">${T('C’est bien lui/elle', 'It’s really them', 'Sí, es quien dice')}</button>` : `<button class="btn btn-main" data-close>${T('Plus tard', 'Later', 'Luego')}</button>`}
       </div>`, (root) => {
       action(root.querySelector('#clDeny'), async () => {
         await api('POST', `claims/${id}/deny`);
         closeSheet();
-        toast(T('Demande refusée', 'Request denied'));
+        toast(T('Demande refusée', 'Request denied', 'Solicitud rechazada'));
         await refresh();
       });
       action(root.querySelector('#clOk'), async () => {
         const r = await api('POST', `claims/${id}/approve`);
         closeSheet();
-        toast(r.status === 'done' ? T(`C’est fait : ${p.name} est de retour 🎉`, `Done: ${p.name} is back 🎉`) : T('Validé 👍 Il manque encore une validation.', 'Approved 👍 One more approval needed.'));
+        toast(r.status === 'done' ? T(`C’est fait : ${p.name} est de retour 🎉`, `Done: ${p.name} is back 🎉`, `Listo: ${p.name} ha vuelto 🎉`) : T('Validé 👍 Il manque encore une validation.', 'Approved 👍 One more approval needed.', 'Confirmado 👍 Falta una confirmación más.'));
         await refresh();
       });
     });
@@ -1777,8 +1786,8 @@
   function liveSwitch() {
     return `
       <div class="seg live-seg">
-        <button type="button" data-live="live" class="${liveMode === 'live' ? 'on' : ''}">${T('En cours', 'Live')}</button>
-        <button type="button" data-live="archive" class="${liveMode === 'archive' ? 'on' : ''}">${T('Archives', 'Archive')}</button>
+        <button type="button" data-live="live" class="${liveMode === 'live' ? 'on' : ''}">${T('En cours', 'Live', 'En curso')}</button>
+        <button type="button" data-live="archive" class="${liveMode === 'archive' ? 'on' : ''}">${T('Archives', 'Archive', 'Archivo')}</button>
       </div>`;
   }
 
@@ -1804,12 +1813,12 @@
       <div class="live-head">${liveSwitch()}${dropMeter()}</div>
       ${!state.live.length ? `
         <div class="card empty">
-          ${T('Rien à voter pour l’instant…<br>Lance une question avec le bouton + si tu t’ennuies.', 'Nothing to vote on right now…<br>Launch a question with the + button if you’re bored.')}
+          ${T('Rien à voter pour l’instant…<br>Lance une question avec le bouton + si tu t’ennuies.', 'Nothing to vote on right now…<br>Launch a question with the + button if you’re bored.', 'Nada que votar por ahora…<br>Lanza una pregunta con el botón + si te aburres.')}
         </div>` : ''}
-      ${todo.length ? `<div class="section-title">${T('À toi de voter', 'Your turn to vote')} <span class="count">${todo.length}</span></div>${todo.map((p) => pollCard(p)).join('')}` : ''}
-      ${!todo.length && done.length ? `<p class="all-done">${T('Tu as voté partout.', 'You voted on everything.')}</p>` : ''}
-      ${done.length ? `<button class="section-title fold-title ${doneFolded ? 'folded' : ''}" id="doneToggle" aria-expanded="${!doneFolded}">${T('Déjà voté', 'Already voted')} <span class="count">${done.length}</span>${icon('down')}</button>${doneFolded ? '' : `<div class="prow-list">${done.map(pollItem).join('')}</div>`}` : ''}
-      <button class="fab" id="fab" aria-label="${T('Lancer une question', 'Launch a question')}">${icon('plus')}</button>`;
+      ${todo.length ? `<div class="section-title">${T('À toi de voter', 'Your turn to vote', 'Te toca votar')} <span class="count">${todo.length}</span></div>${todo.map((p) => pollCard(p)).join('')}` : ''}
+      ${!todo.length && done.length ? `<p class="all-done">${T('Tu as voté partout.', 'You voted on everything.', 'Ya has votado en todas.')}</p>` : ''}
+      ${done.length ? `<button class="section-title fold-title ${doneFolded ? 'folded' : ''}" id="doneToggle" aria-expanded="${!doneFolded}">${T('Déjà voté', 'Already voted', 'Ya votadas')} <span class="count">${done.length}</span>${icon('down')}</button>${doneFolded ? '' : `<div class="prow-list">${done.map(pollItem).join('')}</div>`}` : ''}
+      <button class="fab" id="fab" aria-label="${T('Lancer une question', 'Launch a question', 'Lanzar una pregunta')}">${icon('plus')}</button>`;
 
     bindPollCards(view);
     bindLiveSwitch(view);
@@ -1884,8 +1893,8 @@
     const start = state.prevDrop && state.prevDrop < end ? state.prevDrop : end - state.settings.intervalHours * 3600e3;
     const frac = Math.min(1, Math.max(0, (now() - start) / (end - start)));
     return `
-      <button class="drop-meter" id="dropMeter" aria-label="${T('Prochaine question dans', 'Next question in')} ${left(end)}">
-        <span class="dm-row"><span class="dm-label">${T('Prochaine question', 'Next question')}</span><b>${left(end).replace(' h ', 'h')}</b></span>
+      <button class="drop-meter" id="dropMeter" aria-label="${T('Prochaine question dans', 'Next question in', 'Próxima pregunta en')} ${left(end)}">
+        <span class="dm-row"><span class="dm-label">${T('Prochaine question', 'Next question', 'Próxima pregunta')}</span><b>${left(end).replace(' h ', 'h')}</b></span>
         <span class="dm-bar"><span style="width:${(frac * 100).toFixed(1)}%"></span></span>
       </button>`;
   }
@@ -1894,11 +1903,11 @@
     const total = state.sets.reduce((n, s) => n + s.total, 0) || 1;
     const pct = Math.round((state.remainingQuestions / total) * 100);
     openSheet(`
-      <div class="sheet-head"><h2>${T('Prochaine question', 'Next question')}</h2><button class="x" data-close>✕</button></div>
-      <p class="drop-info-big">${clock(state.nextDrop)} <span class="muted">· ${T('dans', 'in')} ${left(state.nextDrop)}</span></p>
+      <div class="sheet-head"><h2>${T('Prochaine question', 'Next question', 'Próxima pregunta')}</h2><button class="x" data-close>✕</button></div>
+      <p class="drop-info-big">${clock(state.nextDrop)} <span class="muted">· ${T('dans', 'in', 'en')} ${left(state.nextDrop)}</span></p>
       <p class="muted small">${scheduleText(state.settings)}</p>
       <div class="reserve">
-        <div class="reserve-label"><span>${T('Questions en réserve', 'Questions left')}</span><b>${state.remainingQuestions} / ${total}</b></div>
+        <div class="reserve-label"><span>${T('Questions en réserve', 'Questions left', 'Preguntas en reserva')}</span><b>${state.remainingQuestions} / ${total}</b></div>
         <div class="reserve-bar"><span style="width:${pct}%"></span></div>
       </div>`, () => {});
   }
@@ -1909,15 +1918,15 @@
     st = { ...st, startHour: hourToLocal(st.startHour, st.timezone), endHour: hourToLocal(st.endHour, st.timezone) };
     const wraps = st.endHour < st.startHour;
     const allDay = (st.endHour + 1) % 24 === st.startHour && st.intervalHours <= 1;
-    const freq = Number(st.intervalHours) === 1 ? T('Une question toutes les heures', 'A question every hour') : T(`Une question toutes les ${every} h`, `A question every ${every}h`);
-    if (allDay) return T(`${freq}, jour et nuit.`, `${freq}, day and night.`);
+    const freq = Number(st.intervalHours) === 1 ? T('Une question toutes les heures', 'A question every hour', 'Una pregunta cada hora') : T(`Une question toutes les ${every} h`, `A question every ${every}h`, `Una pregunta cada ${every} h`);
+    if (allDay) return T(`${freq}, jour et nuit.`, `${freq}, day and night.`, `${freq}, día y noche.`);
     return T(`${freq}, de ${st.startHour} h à ${st.endHour} h${wraps ? ' (le lendemain)' : ''}.`,
-      `${freq}, from ${hourLabel(st.startHour)} to ${hourLabel(st.endHour)}${wraps ? ' (next day)' : ''}.`);
+      `${freq}, from ${hourLabel(st.startHour)} to ${hourLabel(st.endHour)}${wraps ? ' (next day)' : ''}.`, `${freq}, de ${hourLabel(st.startHour)} a ${hourLabel(st.endHour)}${wraps ? ' (del día siguiente)' : ''}.`);
   }
   const hourLabel = (h) => {
     const hh = Math.floor(h);
     const mm = String(Math.round((h % 1) * 60)).padStart(2, '0');
-    return L ? `${hh}:${mm}` : `${hh} h${mm === '00' ? '' : mm}`;
+    return LANG === 'fr' ? `${hh} h${mm === '00' ? '' : mm}` : `${hh}:${mm}`;
   };
 
   // L'anneau avance tout seul, sans redessiner l'écran.
@@ -1942,7 +1951,7 @@
   });
   window.addEventListener('appinstalled', () => {
     installPrompt = null;
-    toast(T('App installée', 'App installed'));
+    toast(T('App installée', 'App installed', 'App instalada'));
     if (state && tab === 'live') renderView();
   });
 
@@ -1952,9 +1961,9 @@
     return `
       <div class="install-banner">
         
-        <div class="ib-text"><b>${T('Installe l’app', 'Install the app')}</b><span>${T(`Une icône sur ton écran d’accueil${isIOS ? ' et les notifs' : ''}.`, `An icon on your home screen${isIOS ? ' and notifications' : ''}.`)}</span></div>
-        <button class="btn btn-main btn-small" id="installBtn">${T('Installer', 'Install')}</button>
-        <button class="x" id="installHide" aria-label="${T('Masquer', 'Hide')}">✕</button>
+        <div class="ib-text"><b>${T('Installe l’app', 'Install the app', 'Instala la app')}</b><span>${T(`Une icône sur ton écran d’accueil${isIOS ? ' et les notifs' : ''}.`, `An icon on your home screen${isIOS ? ' and notifications' : ''}.`, `Un icono en tu pantalla de inicio${isIOS ? ' y las notis' : ''}.`)}</span></div>
+        <button class="btn btn-main btn-small" id="installBtn">${T('Installer', 'Install', 'Instalar')}</button>
+        <button class="x" id="installHide" aria-label="${T('Masquer', 'Hide', 'Ocultar')}">✕</button>
       </div>`;
   }
 
@@ -1974,7 +1983,7 @@
         return;
       }
       openSheet(`
-        <div class="sheet-head"><h2>${T('Installer sur iPhone', 'Install on iPhone')}</h2><button class="x" data-close>✕</button></div>
+        <div class="sheet-head"><h2>${T('Installer sur iPhone', 'Install on iPhone', 'Instalar en iPhone')}</h2><button class="x" data-close>✕</button></div>
         <ol class="steps">${T(`
           <li>Ouvre ce site dans <b>Safari</b>.</li>
           <li>Touche le bouton <b>Partager</b> <span class="share-ico">⎋</span> (le carré avec une flèche, en bas de l’écran).</li>
@@ -1983,10 +1992,14 @@
           <li>Open this site in <b>Safari</b>.</li>
           <li>Tap the <b>Share</b> button <span class="share-ico">⎋</span> (the square with an arrow, at the bottom of the screen).</li>
           <li>Pick <b>Add to Home Screen</b>, then <b>Add</b>.</li>
-          <li>Open the app from the new icon, then go to <b>Me → Turn on notifications</b>.</li>`)}
+          <li>Open the app from the new icon, then go to <b>Me → Turn on notifications</b>.</li>`, `
+          <li>Abre esta web en <b>Safari</b>.</li>
+          <li>Toca el botón <b>Compartir</b> <span class="share-ico">⎋</span> (el cuadrado con la flecha, abajo del todo).</li>
+          <li>Elige <b>Añadir a pantalla de inicio</b> y luego <b>Añadir</b>.</li>
+          <li>Abre la app desde el nuevo icono y ve a <b>Yo → Activar notificaciones</b>.</li>`)}
         </ol>
-        <p class="muted small">${T('Les notifs sur iPhone demandent iOS 16.4 ou plus récent.', 'Notifications on iPhone need iOS 16.4 or newer.')}</p>
-        <button class="btn btn-main btn-block" data-close>${T('Compris', 'Got it')}</button>`, () => {});
+        <p class="muted small">${T('Les notifs sur iPhone demandent iOS 16.4 ou plus récent.', 'Notifications on iPhone need iOS 16.4 or newer.', 'Para las notis en iPhone hace falta iOS 16.4 o superior.')}</p>
+        <button class="btn btn-main btn-block" data-close>${T('Compris', 'Got it', 'Vale')}</button>`, () => {});
     };
   }
 
@@ -2019,28 +2032,28 @@
       const leftToday = state.me.dropsLeft;
       const none = leftToday <= 0;
       const off = state.me.dropsPerDay <= 0;
-      const reset = state.settings.timezone === myTz ? T('à minuit', 'at midnight') : T(`à ${clock(state.me.dropsResetAt)}`, `at ${clock(state.me.dropsResetAt)}`);
+      const reset = state.settings.timezone === myTz ? T('à minuit', 'at midnight', 'a medianoche') : T(`à ${clock(state.me.dropsResetAt)}`, `at ${clock(state.me.dropsResetAt)}`, `a las ${clock(state.me.dropsResetAt)}`);
       openSheet(`
-        <div class="sheet-head"><h2>${T('Lancer une question', 'Launch a question')}</h2><button class="x" data-close>✕</button></div>
+        <div class="sheet-head"><h2>${T('Lancer une question', 'Launch a question', 'Lanzar una pregunta')}</h2><button class="x" data-close>✕</button></div>
         <p class="drops-left ${none ? 'empty' : ''}">${off
-          ? T('L’admin a désactivé les questions en plus dans ce groupe.', 'The admin turned off extra questions in this group.')
+          ? T('L’admin a désactivé les questions en plus dans ce groupe.', 'The admin turned off extra questions in this group.', 'El admin ha desactivado las preguntas extra en este grupo.')
           : none
-            ? T(`Tu as utilisé ${state.me.dropsPerDay > 1 ? `tes ${state.me.dropsPerDay} questions` : 'ta question'} en plus du jour. Ça repart ${reset}.`, `You used your extra question${state.me.dropsPerDay > 1 ? 's' : ''} for today. Resets ${reset}.`)
-            : T(`Il te reste <b>${leftToday}</b> question${leftToday > 1 ? 's' : ''} en plus aujourd’hui (sur ${state.me.dropsPerDay}). Elle part tout de suite, pour ${pollDuration()}.`, `You’ve got <b>${leftToday}</b> extra question${leftToday > 1 ? 's' : ''} left today (out of ${state.me.dropsPerDay}). It goes out right away, for ${pollDuration()}.`)}</p>
+            ? T(`Tu as utilisé ${state.me.dropsPerDay > 1 ? `tes ${state.me.dropsPerDay} questions` : 'ta question'} en plus du jour. Ça repart ${reset}.`, `You used your extra question${state.me.dropsPerDay > 1 ? 's' : ''} for today. Resets ${reset}.`, `Ya has usado ${state.me.dropsPerDay > 1 ? 'tus preguntas extra' : 'tu pregunta extra'} de hoy. Se recarga ${reset}.`)
+            : T(`Il te reste <b>${leftToday}</b> question${leftToday > 1 ? 's' : ''} en plus aujourd’hui (sur ${state.me.dropsPerDay}). Elle part tout de suite, pour ${pollDuration()}.`, `You’ve got <b>${leftToday}</b> extra question${leftToday > 1 ? 's' : ''} left today (out of ${state.me.dropsPerDay}). It goes out right away, for ${pollDuration()}.`, `Hoy aún tienes <b>${leftToday}</b> pregunta${leftToday > 1 ? 's' : ''} extra (de ${state.me.dropsPerDay}). Sale al momento y dura ${pollDuration()}.`)}</p>
         <label>Set</label>
         <div class="set-chips">
-          <button class="chip ${!setId ? 'on' : ''}" data-set="">${T('N’importe lequel', 'Any')}</button>
+          <button class="chip ${!setId ? 'on' : ''}" data-set="">${T('N’importe lequel', 'Any', 'Cualquiera')}</button>
           ${sets.map((x) => `<button class="chip ${setId === x.id ? 'on' : ''} ${x.spicy ? 'spicy' : ''}" data-set="${x.id}">${esc(setName(x))}</button>`).join('')}
         </div>
-        <label for="ownQ">${T('Ta question', 'Your question')} <span class="muted">${T('(sinon : une question surprise du set)', '(or leave empty for a surprise question)')}</span></label>
-        <textarea class="input" id="ownQ" maxlength="200" placeholder="${T('Qui serait le plus susceptible de…', 'Who would be most likely to…')}" ${none ? 'disabled' : ''}>${esc(draft)}</textarea>
-        <p class="muted small own-hint" id="ownHint" ${draft.trim() ? '' : 'hidden'}>${T('Elle apparaîtra avec ton nom, comme question perso.', 'It’ll show up with your name, as your own question.')}</p>
+        <label for="ownQ">${T('Ta question', 'Your question', 'Tu pregunta')} <span class="muted">${T('(sinon : une question surprise du set)', '(or leave empty for a surprise question)', '(si no, una pregunta sorpresa del set)')}</span></label>
+        <textarea class="input" id="ownQ" maxlength="200" placeholder="${T('Qui serait le plus susceptible de…', 'Who would be most likely to…', '¿Quién sería más capaz de…')}" ${none ? 'disabled' : ''}>${esc(draft)}</textarea>
+        <p class="muted small own-hint" id="ownHint" ${draft.trim() ? '' : 'hidden'}>${T('Elle apparaîtra avec ton nom, comme question perso.', 'It’ll show up with your name, as your own question.', 'Saldrá con tu nombre, como pregunta tuya.')}</p>
         <button class="btn btn-main btn-block" id="dropGo" ${none ? 'disabled' : ''}></button>`, (root) => {
         const area = root.querySelector('#ownQ');
         const go = root.querySelector('#dropGo');
         const label = () => {
           const own = draft.trim().length > 0;
-          go.textContent = own ? T('Lancer ma question', 'Launch my question') : `${T('Question surprise', 'Surprise question')}${s ? ` · ${s.remaining} ${T('dispo', 'left')}` : ''}`;
+          go.textContent = own ? T('Lancer ma question', 'Launch my question', 'Lanzar mi pregunta') : `${T('Question surprise', 'Surprise question', 'Pregunta sorpresa')}${s ? ` · ${s.remaining} ${T('dispo', 'left', 'libres')}` : ''}`;
           go.disabled = none || (!own && s && !s.remaining);
           root.querySelector('#ownHint').hidden = !own;
         };
@@ -2054,11 +2067,11 @@
         action(go, async () => {
           const text = draft.trim();
           if (!text) return drop({ setId: setId || undefined });
-          if (text.length < 8) throw new Error(T('Écris une vraie question', 'Write a real question'));
+          if (text.length < 8) throw new Error(T('Écris une vraie question', 'Write a real question', 'Escribe una pregunta de verdad'));
           if (!setId) {
             root.querySelector('.set-chips').classList.add('shake');
             setTimeout(() => root.querySelector('.set-chips')?.classList.remove('shake'), 600);
-            throw new Error(T('Choisis le set de ta question', 'Pick a set for your question'));
+            throw new Error(T('Choisis le set de ta question', 'Pick a set for your question', 'Elige el set de tu pregunta'));
           }
           await drop({ setId, text });
           save('dropDraft', null);
@@ -2080,7 +2093,7 @@
     replacePoll(poll);
     state.me.dropsLeft = dropsLeft;
     closeSheet();
-    toast(poll.custom ? T('Ta question est lancée 🚀', 'Your question is live 🚀') : T(`Question lancée · encore ${dropsLeft} aujourd’hui`, `Question launched · ${dropsLeft} left today`));
+    toast(poll.custom ? T('Ta question est lancée 🚀', 'Your question is live 🚀', '¡Pregunta lanzada! 🚀') : T(`Question lancée · encore ${dropsLeft} aujourd’hui`, `Question launched · ${dropsLeft} left today`, `Pregunta lanzada · te quedan ${dropsLeft} hoy`));
     tab = 'live';
     save('tab', tab);
     await refresh();
@@ -2094,12 +2107,12 @@
       <div class="live-head">${liveSwitch()}${dropMeter()}</div>
       <div class="filter-row">
         <select class="input" id="archSet">
-          <option value="">${T('Tous les sets', 'All sets')}</option>
+          <option value="">${T('Tous les sets', 'All sets', 'Todos los sets')}</option>
           ${state.sets.map((s) => `<option value="${s.id}" ${archiveSet === s.id ? 'selected' : ''}>${esc(s.emoji)} ${esc(setName(s))}</option>`).join('')}
         </select>
       </div>
-      ${data.items.length ? `<div class="prow-list">${data.items.map(pollItem).join('')}</div>` : `<div class="card empty">${T(`Rien dans les archives pour l’instant.<br>Les questions y arrivent après leurs ${pollDuration()} de vote.`, `Nothing in the archive yet.<br>Questions land here after their ${pollDuration()} of voting.`)}</div>`}
-      ${data.hasMore ? `<button class="btn btn-soft btn-block" id="more">${T('Voir plus', 'Show more')}</button>` : ''}`;
+      ${data.items.length ? `<div class="prow-list">${data.items.map(pollItem).join('')}</div>` : `<div class="card empty">${T(`Rien dans les archives pour l’instant.<br>Les questions y arrivent après leurs ${pollDuration()} de vote.`, `Nothing in the archive yet.<br>Questions land here after their ${pollDuration()} of voting.`, `El archivo está vacío por ahora.<br>Las preguntas llegan aquí después de sus ${pollDuration()} de votación.`)}</div>`}
+      ${data.hasMore ? `<button class="btn btn-soft btn-block" id="more">${T('Voir plus', 'Show more', 'Ver más')}</button>` : ''}`;
 
     bindPollCards(view);
     bindLiveSwitch(view);
@@ -2131,13 +2144,13 @@
       <button class="set-card ${s.spicy ? 'spicy' : ''}" data-open="${s.id}">
         <span class="set-emoji">${esc(s.emoji)}</span>
         <span class="set-name">${esc(setName(s))}</span>
-        <span class="set-count">${T(`${s.played} jouée${s.played > 1 ? 's' : ''} · ${s.remaining} secrète${s.remaining > 1 ? 's' : ''}`, `${s.played} played · ${s.remaining} secret`)}</span>
-        ${s.builtin ? '' : `<span class="set-tag">${T('par', 'by')} ${esc(s.author ? player(s.author).name : '?')}</span>`}
+        <span class="set-count">${T(`${s.played} jouée${s.played > 1 ? 's' : ''} · ${s.remaining} secrète${s.remaining > 1 ? 's' : ''}`, `${s.played} played · ${s.remaining} secret`, `Jugadas: ${s.played} · Secretas: ${s.remaining}`)}</span>
+        ${s.builtin ? '' : `<span class="set-tag">${T('par', 'by', 'por')} ${esc(s.author ? player(s.author).name : '?')}</span>`}
       </button>`).join('')}</div>`;
 
     view.innerHTML = `
-      <button class="btn btn-main btn-block" id="newSet" style="margin-top:0">＋ ${T('Créer un set', 'Create a set')}</button>
-      <div class="section-title">${T('Les sets', 'Sets')} <span class="count">${classic.length}</span></div>
+      <button class="btn btn-main btn-block" id="newSet" style="margin-top:0">＋ ${T('Créer un set', 'Create a set', 'Crear un set')}</button>
+      <div class="section-title">${T('Les sets', 'Sets', 'Los sets')} <span class="count">${classic.length}</span></div>
       ${grid(classic)}
       ${spicy.length ? `<div class="section-title">Spicy · 18+ <span class="count">${spicy.length}</span></div>${grid(spicy)}` : ''}`;
 
@@ -2148,14 +2161,14 @@
   function openSetForm(existing) {
     let emoji = existing ? existing.emoji : '✨';
     openSheet(`
-      <div class="sheet-head"><h2>${existing ? T('Modifier le set', 'Edit the set') : T('Nouveau set', 'New set')}</h2><button class="x" data-close>✕</button></div>
-      <label for="setName">${T('Nom', 'Name')}</label>
-      <input class="input" id="setName" maxlength="40" placeholder="${T('Ex : Les vacances à Lisbonne', 'Ex: That trip to Lisbon')}" value="${esc(existing ? existing.name : '')}">
-      <label for="setDesc">Description</label>
-      <input class="input" id="setDesc" maxlength="120" placeholder="${T('De quoi ça parle ?', 'What’s it about?')}" value="${esc(existing ? existing.description : '')}">
+      <div class="sheet-head"><h2>${existing ? T('Modifier le set', 'Edit the set', 'Editar set') : T('Nouveau set', 'New set', 'Nuevo set')}</h2><button class="x" data-close>✕</button></div>
+      <label for="setName">${T('Nom', 'Name', 'Nombre')}</label>
+      <input class="input" id="setName" maxlength="40" placeholder="${T('Ex : Les vacances à Lisbonne', 'Ex: That trip to Lisbon', 'Ej.: Vacaciones en Lisboa')}" value="${esc(existing ? existing.name : '')}">
+      <label for="setDesc">${T('Description', 'Description', 'Descripción')}</label>
+      <input class="input" id="setDesc" maxlength="120" placeholder="${T('De quoi ça parle ?', 'What’s it about?', '¿De qué va?')}" value="${esc(existing ? existing.description : '')}">
       <label>Emoji</label>${emojiGrid(SET_EMOJIS, emoji)}
-      <label class="toggle"><input type="checkbox" id="setSpicy" ${existing && existing.spicy ? 'checked' : ''}> <span>${T('Set spicy (18+)', 'Spicy set (18+)')}</span></label>
-      <button class="btn btn-main btn-block" id="saveSet">${existing ? T('Enregistrer', 'Save') : T('Créer le set', 'Create the set')}</button>`, (root) => {
+      <label class="toggle"><input type="checkbox" id="setSpicy" ${existing && existing.spicy ? 'checked' : ''}> <span>${T('Set spicy (18+)', 'Spicy set (18+)', 'Set picante (18+)')}</span></label>
+      <button class="btn btn-main btn-block" id="saveSet">${existing ? T('Enregistrer', 'Save', 'Guardar') : T('Créer le set', 'Create the set', 'Crear el set')}</button>`, (root) => {
       bindEmojiGrid(root, (e) => (emoji = e));
       action(root.querySelector('#saveSet'), async () => {
         const body = {
@@ -2166,7 +2179,7 @@
         };
         const { set } = existing ? await api('PATCH', `sets/${existing.id}`, body) : await api('POST', 'sets', body);
         closeSheet();
-        toast(existing ? T('Set modifié', 'Set updated') : T('Set créé. Ajoute des questions.', 'Set created. Add some questions.'));
+        toast(existing ? T('Set modifié', 'Set updated', 'Set editado') : T('Set créé. Ajoute des questions.', 'Set created. Add some questions.', 'Set creado. Añade preguntas.'));
         openSet = set.id;
         setDetail = null;
         await refresh();
@@ -2178,7 +2191,7 @@
     const s = state.sets.find((x) => x.id === openSet);
     if (!s) { openSet = null; return renderSets(view); }
     if (!setDetail || setDetail.set.id !== s.id) {
-      view.innerHTML = `<div class="card empty">${T('Chargement…', 'Loading…')}</div>`;
+      view.innerHTML = `<div class="card empty">${T('Chargement…', 'Loading…', 'Cargando…')}</div>`;
       try {
         setDetail = await api('GET', `sets/${s.id}`);
       } catch (e) {
@@ -2192,35 +2205,35 @@
     const canEdit = !s.builtin && (s.mine || state.me.isAdmin);
 
     view.innerHTML = `
-      <button class="back" id="back">← ${T('Tous les sets', 'All sets')}</button>
+      <button class="back" id="back">← ${T('Tous les sets', 'All sets', 'Todos los sets')}</button>
       <div class="card set-hero ${s.spicy ? 'spicy' : ''}">
         <span class="set-emoji big">${esc(s.emoji)}</span>
         <h2 class="question" style="margin:4px 0">${esc(setName(s))}${s.spicy ? ' <span class="set-badge spicy">18+</span>' : ''}</h2>
         ${setDesc(s) ? `<p class="muted" style="margin:0">${esc(setDesc(s))}</p>` : ''}
-        <p class="set-count" style="margin:10px 0 0">${T(`${s.played} jouée${s.played > 1 ? 's' : ''} · ${s.remaining} encore secrète${s.remaining > 1 ? 's' : ''}`, `${s.played} played · ${s.remaining} still secret`)}</p>
+        <p class="set-count" style="margin:10px 0 0">${T(`${s.played} jouée${s.played > 1 ? 's' : ''} · ${s.remaining} encore secrète${s.remaining > 1 ? 's' : ''}`, `${s.played} played · ${s.remaining} still secret`, `Jugadas: ${s.played} · Aún secretas: ${s.remaining}`)}</p>
         <div class="row">
-          <button class="btn btn-main" id="dropHere" ${s.remaining ? '' : 'disabled'}>${T('Lancer une question', 'Launch a question')}</button>
-          ${canEdit ? `<button class="btn btn-soft" id="editSet">${T('Modifier', 'Edit')}</button>` : ''}
+          <button class="btn btn-main" id="dropHere" ${s.remaining ? '' : 'disabled'}>${T('Lancer une question', 'Launch a question', 'Lanzar una pregunta')}</button>
+          ${canEdit ? `<button class="btn btn-soft" id="editSet">${T('Modifier', 'Edit', 'Editar')}</button>` : ''}
         </div>
       </div>
 
       <div class="card">
-        <label for="newQ" style="margin-top:0">${T('Ajouter des questions', 'Add questions')}</label>
-        <textarea class="input" id="newQ" placeholder="${T('Une question par ligne.&#10;Qui est le plus susceptible de…', 'One question per line.&#10;Who’s most likely to…')}"></textarea>
-        <p class="muted small">${T('Elles restent secrètes jusqu’à ce qu’elles tombent. Pas de doublons : on vérifie !', 'They stay secret until they drop. No duplicates, we check!')}</p>
-        <button class="btn btn-soft btn-block" id="addQ" style="margin-top:10px">${T('Ajouter au set', 'Add to the set')}</button>
+        <label for="newQ" style="margin-top:0">${T('Ajouter des questions', 'Add questions', 'Añadir preguntas')}</label>
+        <textarea class="input" id="newQ" placeholder="${T('Une question par ligne.&#10;Qui est le plus susceptible de…', 'One question per line.&#10;Who’s most likely to…', 'Una pregunta por línea.&#10;¿Quién es más capaz de…')}"></textarea>
+        <p class="muted small">${T('Elles restent secrètes jusqu’à ce qu’elles tombent. Pas de doublons : on vérifie !', 'They stay secret until they drop. No duplicates, we check!', 'Siguen en secreto hasta que salen. Nada de repetidas: ¡lo comprobamos!')}</p>
+        <button class="btn btn-soft btn-block" id="addQ" style="margin-top:10px">${T('Ajouter au set', 'Add to the set', 'Añadir al set')}</button>
       </div>
 
       ${d.mine.length ? `
-        <div class="section-title">${T('Tes questions en attente', 'Your questions waiting')} <span class="count">${d.mine.length}</span></div>
+        <div class="section-title">${T('Tes questions en attente', 'Your questions waiting', 'Tus preguntas pendientes')} <span class="count">${d.mine.length}</span></div>
         <div class="card qlist">${d.mine.map((q) => `
-          <div class="qrow"><span>${esc(q.text)}</span><button class="btn btn-small btn-danger" data-delq="${q.id}" aria-label="${T('Supprimer', 'Delete')}">${icon('trash')}</button></div>`).join('')}
+          <div class="qrow"><span>${esc(q.text)}</span><button class="btn btn-small btn-danger" data-delq="${q.id}" aria-label="${T('Supprimer', 'Delete', 'Borrar')}">${icon('trash')}</button></div>`).join('')}
         </div>` : ''}
 
-      <div class="section-title">${T('Déjà jouées', 'Already played')} <span class="count">${d.played.length}</span></div>
+      <div class="section-title">${T('Déjà jouées', 'Already played', 'Ya jugadas')} <span class="count">${d.played.length}</span></div>
       ${d.played.length ? `<div class="card qlist">${d.played.map((q) => `<div class="qrow"><span>${esc(qText(q))}</span><span class="muted small">${ago(q.usedAt)}</span></div>`).join('')}</div>`
-        : `<div class="card empty" style="padding:18px">${T('Aucune question jouée pour l’instant.', 'No questions played yet.')}</div>`}
-      ${canEdit && !s.played ? `<button class="btn btn-danger btn-block" id="delSet">${T('Supprimer ce set', 'Delete this set')}</button>` : ''}`;
+        : `<div class="card empty" style="padding:18px">${T('Aucune question jouée pour l’instant.', 'No questions played yet.', 'Todavía no se ha jugado ninguna pregunta.')}</div>`}
+      ${canEdit && !s.played ? `<button class="btn btn-danger btn-block" id="delSet">${T('Supprimer ce set', 'Delete this set', 'Borrar este set')}</button>` : ''}`;
 
     document.getElementById('back').onclick = () => { openSet = null; renderView(); };
     document.getElementById('dropHere').onclick = () => openDropSheet(s.id);
@@ -2228,22 +2241,22 @@
     action(document.getElementById('addQ'), async () => {
       const text = document.getElementById('newQ').value;
       const r = await api('POST', `sets/${s.id}/questions`, { text });
-      toast(r.added.length ? T(`${plural(r.added.length, 'question')} ajoutée${r.added.length > 1 ? 's' : ''}`, `${plural(r.added.length, 'question')} added`) : T('Rien ajouté', 'Nothing added'));
-      if (r.errors.length) alert(T('Pas ajoutées :', 'Not added:') + '\n\n' + r.errors.join('\n'));
+      toast(r.added.length ? T(`${plural(r.added.length, 'question')} ajoutée${r.added.length > 1 ? 's' : ''}`, `${plural(r.added.length, 'question')} added`, `Añadido: ${plural(r.added.length, 'pregunta')}`) : T('Rien ajouté', 'Nothing added', 'No se ha añadido nada'));
+      if (r.errors.length) alert(T('Pas ajoutées :', 'Not added:', 'No se han añadido:') + '\n\n' + r.errors.join('\n'));
       setDetail = null;
       await refresh();
     });
     view.querySelectorAll('[data-delq]').forEach((b) => action(b, async () => {
-      if (!confirm(T('Supprimer cette question ?', 'Delete this question?'))) return;
+      if (!confirm(T('Supprimer cette question ?', 'Delete this question?', '¿Borrar esta pregunta?'))) return;
       await api('DELETE', `questions/${b.dataset.delq}`);
       setDetail = null;
       await refresh();
     }));
     action(document.getElementById('delSet'), async () => {
-      if (!confirm(T(`Supprimer le set « ${s.name} » et ses questions ?`, `Delete the set “${s.name}” and its questions?`))) return;
+      if (!confirm(T(`Supprimer le set « ${s.name} » et ses questions ?`, `Delete the set “${s.name}” and its questions?`, `¿Borrar el set «${s.name}» y sus preguntas?`))) return;
       await api('DELETE', `sets/${s.id}`);
       openSet = null;
-      toast(T('Set supprimé', 'Set deleted'));
+      toast(T('Set supprimé', 'Set deleted', 'Set borrado'));
       await refresh();
     });
   }
@@ -2259,9 +2272,9 @@
       </div>`;
     view.innerHTML = `
       <div class="seg seg-3 stats-seg">
-        <button type="button" data-smode="me" class="${statsMode === 'me' ? 'on' : ''}">${T('Profil', 'Profile')}</button>
-        <button type="button" data-smode="duo" class="${statsMode === 'duo' ? 'on' : ''}">${T('Affinités', 'Duos')}</button>
-        <button type="button" data-smode="group" class="${statsMode === 'group' ? 'on' : ''}">${T('Groupe', 'Group')}</button>
+        <button type="button" data-smode="me" class="${statsMode === 'me' ? 'on' : ''}">${T('Profil', 'Profile', 'Perfil')}</button>
+        <button type="button" data-smode="duo" class="${statsMode === 'duo' ? 'on' : ''}">${T('Affinités', 'Duos', 'Afinidades')}</button>
+        <button type="button" data-smode="group" class="${statsMode === 'group' ? 'on' : ''}">${T('Groupe', 'Group', 'Grupo')}</button>
       </div>
       ${strip}
       ${statsMode === 'duo' ? statsDuo(pid) : statsMode === 'group' ? statsGroup() : statsProfile(pid)}`;
@@ -2269,6 +2282,7 @@
     view.querySelectorAll('[data-smode]').forEach((b) => (b.onclick = () => { statsMode = b.dataset.smode; save('statsMode', statsMode); renderView(); }));
     view.querySelectorAll('[data-goto]').forEach((b) => (b.onclick = () => { statsPlayer = b.dataset.goto; renderView(); window.scrollTo({ top: 0, behavior: 'smooth' }); }));
     view.querySelectorAll('[data-recap]').forEach((b) => (b.onclick = () => openRecap(b.dataset.recap)));
+    view.querySelectorAll('[data-recapsall]').forEach((b) => (b.onclick = () => { recapsAll = !recapsAll; renderView(); }));
     const sc = document.getElementById('streakCard');
     if (sc) sc.onclick = () => openStreakSheet();
   }
@@ -2301,30 +2315,30 @@
               <span class="name">${esc(r.u.name)}</span>
               <span class="rank-bar"><span style="width:${r.v}%;background:${esc(r.u.color)}"></span></span>
               <span class="rank-val">${r.v}</span>
-            </div>`).join('') : `<div class="muted small">${T('Pas encore de données', 'No data yet')}</div>`}
+            </div>`).join('') : `<div class="muted small">${T('Pas encore de données', 'No data yet', 'Aún no hay datos')}</div>`}
         </div>`;
     };
 
     return `
       <div class="card radar-card">
-        <div class="radar-title">${avatar(p)}<div><b>${esc(p.name)}</b>${ps.polls ? `<div class="muted small">${T(`A reçu des votes dans ${plural(ps.polls, 'sondage')} terminé${ps.polls > 1 ? 's' : ''}`, `Got votes in ${plural(ps.polls, 'finished poll')}`)}</div>` : ''}</div></div>
-        ${anyData ? window.radarSvg(radarDefs, ps.value, p.color, active.length > 1 ? avg : null) : `<div class="empty">${T('Les stats arrivent quand les premiers sondages se terminent.', 'Stats show up once the first polls are over.')}</div>`}
-        ${anyData && active.length > 1 ? `<div class="legend"><span class="dash"></span> ${T('moyenne du groupe', 'group average')}</div>` : ''}
-        ${myTitles.length || unan.length ? `<div class="title-chips">${myTitles.map((t) => `<span class="title-chip ${t.low ? 'low' : ''}">${t.emoji} ${esc(titleText(t))}</span>`).join('')}${unan.length ? `<span class="title-chip moment" title="${T('Tout le monde a voté pour', 'Everyone voted for')} ${esc(p.name)}">👑 ${T('Unanimité', 'Unanimous')} ×${unan.length}</span>` : ''}</div>` : ''}
-        ${anyData && st.ended < st.titlesAt ? `<p class="muted small" style="margin:10px 0 0">${T(`Les titres se débloquent après ${st.titlesAt} sondages terminés (encore ${st.titlesAt - st.ended}).`, `Titles unlock after ${st.titlesAt} finished polls (${st.titlesAt - st.ended} to go).`)}</p>` : ''}
+        <div class="radar-title">${avatar(p)}<div><b>${esc(p.name)}</b>${ps.polls ? `<div class="muted small">${T(`A reçu des votes dans ${plural(ps.polls, 'sondage')} terminé${ps.polls > 1 ? 's' : ''}`, `Got votes in ${plural(ps.polls, 'finished poll')}`, `Ha recibido votos en ${plural(ps.polls, 'pregunta')} (de las ya terminadas)`)}</div>` : ''}</div></div>
+        ${anyData ? window.radarSvg(radarDefs, ps.value, p.color, active.length > 1 ? avg : null) : `<div class="empty">${T('Les stats arrivent quand les premiers sondages se terminent.', 'Stats show up once the first polls are over.', 'Las stats salen cuando terminen las primeras preguntas.')}</div>`}
+        ${anyData && active.length > 1 ? `<div class="legend"><span class="dash"></span> ${T('moyenne du groupe', 'group average', 'media del grupo')}</div>` : ''}
+        ${myTitles.length || unan.length ? `<div class="title-chips">${myTitles.map((t) => `<span class="title-chip ${t.low ? 'low' : ''}">${t.emoji} ${esc(titleText(t))}</span>`).join('')}${unan.length ? `<span class="title-chip moment" title="${T('Tout le monde a voté pour', 'Everyone voted for', 'Todo el mundo ha votado a')} ${esc(p.name)}">👑 ${T('Unanimité', 'Unanimous', 'Unanimidad')} ×${unan.length}</span>` : ''}</div>` : ''}
+        ${anyData && st.ended < st.titlesAt ? `<p class="muted small" style="margin:10px 0 0">${T(`Les titres se débloquent après ${st.titlesAt} sondages terminés (encore ${st.titlesAt - st.ended}).`, `Titles unlock after ${st.titlesAt} finished polls (${st.titlesAt - st.ended} to go).`, `Los títulos se desbloquean tras ${st.titlesAt} preguntas terminadas (faltan ${st.titlesAt - st.ended}).`)}</p>` : ''}
       </div>
       ${ps.wins.length ? `
-        <div class="section-title">${T('Élu pour…', 'Voted most…')} <span class="count">${ps.wins.length}</span></div>
+        <div class="section-title">${T('Élu pour…', 'Voted most…', 'Elegido para…')} <span class="count">${ps.wins.length}</span></div>
         <div class="card qlist">${ps.wins.slice(0, 15).map((w) => `<div class="qrow"><span>${esc(qText(w))}</span><span class="muted small">${unan.some((u) => u.id === w.id) ? '👑' : esc(setOf(w.setId).emoji)}</span></div>`).join('')}</div>` : ''}
       ${unan.length ? `
-        <div class="section-title">${T('Moments mémorables', 'Memorable moments')} <span class="count">${unan.length}</span></div>
-        <div class="card qlist moments">${unan.slice(0, 10).map((w) => `<div class="qrow"><span>👑 ${esc(qText(w))}</span><span class="muted small">${T('tout le monde', 'everyone')}</span></div>`).join('')}</div>` : ''}
+        <div class="section-title">${T('Moments mémorables', 'Memorable moments', 'Momentazos')} <span class="count">${unan.length}</span></div>
+        <div class="card qlist moments">${unan.slice(0, 10).map((w) => `<div class="qrow"><span>👑 ${esc(qText(w))}</span><span class="muted small">${T('tout le monde', 'everyone', 'todo el mundo')}</span></div>`).join('')}</div>` : ''}
       ${st.titles.length ? `
-        <div class="section-title">${T('Les titres du groupe', 'Group titles')}</div>
+        <div class="section-title">${T('Les titres du groupe', 'Group titles', 'Los títulos del grupo')}</div>
         <div class="card titles-board">${st.titles.map((t) => `
           <div class="title-row">${avatar(player(t.playerId), 'sm')}<span class="name">${esc(player(t.playerId).name)}</span><span class="title-chip ${t.low ? 'low' : ''}">${t.emoji} ${esc(titleText(t))}</span></div>`).join('')}
         </div>` : ''}
-      ${anyData ? `<div class="section-title">${T('Classements', 'Rankings')}</div>${defs.map(ranking).join('')}` : ''}`;
+      ${anyData ? `<div class="section-title">${T('Classements', 'Rankings', 'Rankings')}</div>${defs.map(ranking).join('')}` : ''}`;
   }
 
   // Affinités : qui vote comme toi, qui vote pour toi, qui a la même réputation que toi…
@@ -2335,7 +2349,7 @@
     const others = state.players.filter((u) => u.id !== pid && aff.pairs[pid] && aff.pairs[pid][u.id]);
     const row = aff.pairs[pid] || {};
     if (aff.polls < 3 || !others.length) {
-      return `<div class="card empty">${T('Les affinités arrivent après quelques sondages terminés (au moins 3).', 'Duos show up after a few finished polls (at least 3).')}${aff.polls ? `<br><span class="muted small">${T(`Encore ${3 - aff.polls}.`, `${3 - aff.polls} to go.`)}</span>` : ''}</div>`;
+      return `<div class="card empty">${T('Les affinités arrivent après quelques sondages terminés (au moins 3).', 'Duos show up after a few finished polls (at least 3).', 'Las afinidades salen tras unas cuantas preguntas terminadas (mínimo 3).')}${aff.polls ? `<br><span class="muted small">${T(`Encore ${3 - aff.polls}.`, `${3 - aff.polls} to go.`, `Faltan ${3 - aff.polls}.`)}</span>` : ''}</div>`;
     }
     const pct = (a, b) => (b ? Math.round((a / b) * 100) : 0);
     const agreeOf = (u) => (row[u.id].common >= 3 ? pct(row[u.id].agree, row[u.id].common) : null);
@@ -2379,24 +2393,24 @@
     const mutual = fan && target && fan.u.id === target.u.id;
     const tiles = [
       mutual
-        ? tile('💞', T('Amour réciproque', 'Mutual crush'), fan, (h) => T(`${votes(h.v)} pour ${you ? 'toi' : name}, ${votes(target.v)} dans l’autre sens`, `${votes(h.v)} for ${you ? 'you' : name}, ${votes(target.v)} the other way`))
-        : tile('💘', T('Fan n°1', 'Biggest fan'), fan, (h) => T(`${you ? 't’a donné' : `a donné à ${name}`} ${votes(h.v)}`, `gave ${you ? 'you' : name} ${votes(h.v)}`)),
-      mutual ? '' : tile('🎯', T('Cible préférée', 'Favourite target'), target, (h) => T(`${you ? 'tu lui as donné' : `${name} lui a donné`} ${votes(h.v)}`, `${you ? 'you gave them' : name + ' gave them'} ${votes(h.v)}`)),
-      tile('👯', T('Jumeau de vote', 'Vote twin'), twin, (h) => T(`même vote ${h.v} % du temps`, `same vote ${h.v}% of the time`)),
-      tile('🙃', T('Opposé de vote', 'Vote opposite'), opposite && (!twin || opposite.u.id !== twin.u.id) ? opposite : null, (h) => T(`même vote ${100 - h.v} % du temps seulement`, `same vote only ${100 - h.v}% of the time`)),
-      tile('🪞', T('Même réputation', 'Same reputation'), rep, (h) => T(`votés sur les mêmes questions (${h.v} %)`, `voted on the same questions (${h.v}%)`)),
-      tile('🌗', T('Tout l’inverse', 'Total opposite'), antiRep && (!rep || antiRep.u.id !== rep.u.id) ? antiRep : null, (h) => T(`jamais votés pour les mêmes trucs (${100 - h.v} %)`, `never voted for the same stuff (${100 - h.v}%)`)),
-      tile('🤝', T('Duo inséparable', 'Inseparable duo'), duo, (h) => T(`dans les résultats ensemble ${plural(h.v, 'fois', 'fois')}`, `in the results together ${h.v} time${h.v > 1 ? 's' : ''}`)),
-      tile('💔', T('Sens unique', 'One-sided'), oneWay, (h) => T(`${you ? 'tu votes' : name + ' vote'} pour ${esc(h.u.name)} (${votes(h.v)}), jamais l’inverse`, `${you ? 'you vote' : name + ' votes'} for ${esc(h.u.name)} (${votes(h.v)}), never the other way`)),
+        ? tile('💞', T('Amour réciproque', 'Mutual crush', 'Amor correspondido'), fan, (h) => T(`${votes(h.v)} pour ${you ? 'toi' : name}, ${votes(target.v)} dans l’autre sens`, `${votes(h.v)} for ${you ? 'you' : name}, ${votes(target.v)} the other way`, `${votes(h.v)} para ${you ? 'ti' : name}, ${votes(target.v)} al revés`))
+        : tile('💘', T('Fan n°1', 'Biggest fan', 'Fan n.º 1'), fan, (h) => T(`${you ? 't’a donné' : `a donné à ${name}`} ${votes(h.v)}`, `gave ${you ? 'you' : name} ${votes(h.v)}`, `${votes(h.v)} para ${you ? 'ti' : name}`)),
+      mutual ? '' : tile('🎯', T('Cible préférée', 'Favourite target', 'Víctima favorita'), target, (h) => T(`${you ? 'tu lui as donné' : `${name} lui a donné`} ${votes(h.v)}`, `${you ? 'you gave them' : name + ' gave them'} ${votes(h.v)}`, `${you ? 'le has dado' : name + ' le ha dado'} ${votes(h.v)}`)),
+      tile('👯', T('Jumeau de vote', 'Vote twin', 'Gemelo de voto'), twin, (h) => T(`même vote ${h.v} % du temps`, `same vote ${h.v}% of the time`, `mismo voto el ${h.v} % de las veces`)),
+      tile('🙃', T('Opposé de vote', 'Vote opposite', 'Polo opuesto'), opposite && (!twin || opposite.u.id !== twin.u.id) ? opposite : null, (h) => T(`même vote ${100 - h.v} % du temps seulement`, `same vote only ${100 - h.v}% of the time`, `mismo voto solo el ${100 - h.v} % de las veces`)),
+      tile('🪞', T('Même réputation', 'Same reputation', 'Misma fama'), rep, (h) => T(`votés sur les mêmes questions (${h.v} %)`, `voted on the same questions (${h.v}%)`, `les votan en las mismas preguntas (${h.v} %)`)),
+      tile('🌗', T('Tout l’inverse', 'Total opposite', 'Todo lo contrario'), antiRep && (!rep || antiRep.u.id !== rep.u.id) ? antiRep : null, (h) => T(`jamais votés pour les mêmes trucs (${100 - h.v} %)`, `never voted for the same stuff (${100 - h.v}%)`, `nunca les votan por lo mismo (${100 - h.v} %)`)),
+      tile('🤝', T('Duo inséparable', 'Inseparable duo', 'Dúo inseparable'), duo, (h) => T(`dans les résultats ensemble ${plural(h.v, 'fois', 'fois')}`, `in the results together ${h.v} time${h.v > 1 ? 's' : ''}`, `juntos en los resultados ${h.v} ${h.v > 1 ? 'veces' : 'vez'}`)),
+      tile('💔', T('Sens unique', 'One-sided', 'No correspondido'), oneWay, (h) => T(`${you ? 'tu votes' : name + ' vote'} pour ${esc(h.u.name)} (${votes(h.v)}), jamais l’inverse`, `${you ? 'you vote' : name + ' votes'} for ${esc(h.u.name)} (${votes(h.v)}), never the other way`, `${you ? 'tú votas' : name + ' vota'} a ${esc(h.u.name)} (${votes(h.v)}), nunca al revés`)),
     ].join('');
 
     let flockLine = '';
     if (flock != null && flockAvg != null) {
-      const kind = flock >= flockAvg + 10 ? ['🐑', T('Mouton', 'Sheep')] : flock <= flockAvg - 10 ? ['🦄', T('Rebelle', 'Rebel')] : ['⚖️', T('Dans la moyenne', 'Middle of the road')];
+      const kind = flock >= flockAvg + 10 ? ['🐑', T('Mouton', 'Sheep', 'Borrego')] : flock <= flockAvg - 10 ? ['🦄', T('Rebelle', 'Rebel', 'Rebelde')] : ['⚖️', T('Dans la moyenne', 'Middle of the road', 'En la media')];
       flockLine = `
         <div class="card flock">
           <span class="duo-emoji">${kind[0]}</span>
-          <div><b>${kind[1]}</b><div class="muted small">${T(`${you ? 'Tu votes' : name + ' vote'} comme la majorité ${flock} % du temps (groupe : ${flockAvg} %)`, `${you ? 'You vote' : name + ' votes'} with the majority ${flock}% of the time (group: ${flockAvg}%)`)}${me_.self ? ' · ' + T(`${votes(me_.self)} pour ${you ? 'toi-même' : 'soi'} 🪞`, `${votes(me_.self)} for ${you ? 'yourself' : 'themselves'} 🪞`) : ''}</div></div>
+          <div><b>${kind[1]}</b><div class="muted small">${T(`${you ? 'Tu votes' : name + ' vote'} comme la majorité ${flock} % du temps (groupe : ${flockAvg} %)`, `${you ? 'You vote' : name + ' votes'} with the majority ${flock}% of the time (group: ${flockAvg}%)`, `${you ? 'Votas' : name + ' vota'} como la mayoría el ${flock} % de las veces (grupo: ${flockAvg} %)`)}${me_.self ? ' · ' + T(`${votes(me_.self)} pour ${you ? 'toi-même' : 'soi'} 🪞`, `${votes(me_.self)} for ${you ? 'yourself' : 'themselves'} 🪞`, `${votes(me_.self)} ${you ? 'para ti' : 'para sí'} 🪞`) : ''}</div></div>
         </div>`;
     }
 
@@ -2405,9 +2419,9 @@
       .map((u) => ({ u, agree: agreeOf(u), sim: row[u.id].sim, out: row[u.id].given, back: voters.includes(u) || (u.claimed && aff.pairs[u.id][pid].given) ? aff.pairs[u.id][pid].given : null }))
       .sort((a, b) => (b.agree ?? -1) - (a.agree ?? -1));
     const table = `
-      <div class="section-title">${you ? T('Toi et chacun', 'You and everyone') : T(`${name} et chacun`, `${name} and everyone`)}</div>
+      <div class="section-title">${you ? T('Toi et chacun', 'You and everyone', 'Tú con cada uno') : T(`${name} et chacun`, `${name} and everyone`, `${name} con cada uno`)}</div>
       <div class="card duo-table">
-        <div class="dt-head"><span></span><span>${T('Votent pareil', 'Vote alike')}</span><span>${T('Votés pareil', 'Voted alike')}</span><span title="${T('votes donnés → / ← reçus', 'votes given → / ← received')}">→ ←</span></div>
+        <div class="dt-head"><span></span><span>${T('Votent pareil', 'Vote alike', 'Votan igual')}</span><span>${T('Votés pareil', 'Voted alike', 'Les votan igual')}</span><span title="${T('votes donnés → / ← reçus', 'votes given → / ← received', 'votos dados → / ← recibidos')}">→ ←</span></div>
         ${rows.map((r) => `
           <button class="dt-row" data-goto="${r.u.id}" style="--pc:${esc(r.u.color)}">
             <span class="dt-who">${avatar(r.u, 'xs')}<span>${esc(r.u.name)}</span></span>
@@ -2415,11 +2429,11 @@
             <span class="dt-bar">${r.sim == null ? '<i class="muted">–</i>' : `<span class="dt-track sim"><span style="width:${r.sim}%"></span></span><b>${r.sim}%</b>`}</span>
             <span class="dt-io">${num(r.out)}·${r.back == null ? '–' : num(r.back)}</span>
           </button>`).join('')}
-        <p class="muted small dt-help">${T('« Votent pareil » : vous avez voté pour la même personne. « Votés pareil » : on vote pour vous deux sur les mêmes questions.', '“Vote alike”: you voted for the same person. “Voted alike”: people vote for you both on the same questions.')}</p>
+        <p class="muted small dt-help">${T('« Votent pareil » : vous avez voté pour la même personne. « Votés pareil » : on vote pour vous deux sur les mêmes questions.', '“Vote alike”: you voted for the same person. “Voted alike”: people vote for you both on the same questions.', '«Votan igual»: habéis votado a la misma persona. «Les votan igual»: os votan a los dos en las mismas preguntas.')}</p>
       </div>`;
 
     return `
-      <div class="duo-intro muted small">${T(`D’après ${plural(aff.polls, 'sondage terminé', 'sondages terminés')}.`, `Based on ${plural(aff.polls, 'finished poll')}.`)}</div>
+      <div class="duo-intro muted small">${T(`D’après ${plural(aff.polls, 'sondage terminé', 'sondages terminés')}.`, `Based on ${plural(aff.polls, 'finished poll')}.`, `Según ${plural(aff.polls, 'pregunta')} ya terminadas.`)}</div>
       <div class="duo-grid">${tiles}</div>
       ${flockLine}
       ${table}`;
@@ -2432,7 +2446,7 @@
       .sort((a, b) => b.current - a.current || b.best - a.best).slice(0, 6);
     return `
       <button class="card streak-card" id="streakCard">
-        <span class="sk-top"><span>🔥 <b>${st.group.current}</b> ${T(`jour${st.group.current > 1 ? 's' : ''} d’affilée où tout le monde a voté`, `day${st.group.current === 1 ? '' : 's'} in a row where everyone voted`)}</span><small class="muted">${T('record', 'best')} ${st.group.best}</small></span>
+        <span class="sk-top"><span>🔥 <b>${st.group.current}</b> ${T(`jour${st.group.current > 1 ? 's' : ''} d’affilée où tout le monde a voté`, `day${st.group.current === 1 ? '' : 's'} in a row where everyone voted`, `${st.group.current === 1 ? 'día seguido' : 'días seguidos'} con votos de todo el mundo`)}</span><small class="muted">${T('record', 'best', 'récord')} ${st.group.best}</small></span>
         <span class="streak-mini">${rows.map((r) => `<span class="${r.today === false ? 'off' : ''}">${avatar(r.u, 'xs')}${r.current}</span>`).join('')}</span>
       </button>`;
   }
@@ -2447,36 +2461,37 @@
     const qList = (list) => list.map((q) => `
       <div class="qrow"><span>${esc(qText(q))}</span><span class="q-rate">${stars(q.avg)}<small>${avgTxt(q.avg)} · ${q.n}</small></span></div>`).join('');
     const tiles = [
-      [c.ended, T('sondages terminés', 'polls done')],
-      [c.votes, T('votes', 'votes')],
-      [c.halves, T('demi-votes', 'half votes')],
-      [c.unanimous, T('unanimités', 'unanimous')],
-      [c.split, T('zéro consensus', 'zero consensus')],
+      [c.ended, T('sondages terminés', 'polls done', 'preguntas terminadas')],
+      [c.votes, T('votes', 'votes', 'votos')],
+      [c.halves, T('demi-votes', 'half votes', 'medios votos')],
+      [c.unanimous, T('unanimités', 'unanimous', 'unanimidades')],
+      [c.split, T('zéro consensus', 'zero consensus', 'cero consenso')],
     ];
     const raters = [...r.raters].sort((a, b) => b.avg - a.avg);
     const generous = raters[0];
     const harsh = raters.length > 1 ? raters[raters.length - 1] : null;
     return `
+      ${(state.recaps || []).length ? `<div class="section-title">🎁 ${T('Les récaps du mois', 'Monthly recaps', 'Resúmenes del mes')}</div>` : ''}
       ${recapCards()}
       <div class="num-tiles">${tiles.map(([n, l]) => `<div class="num-tile"><b>${n}</b><span>${l}</span></div>`).join('')}</div>
       ${streakSection()}
 
-      <div class="section-title">${T('Les questions préférées', 'Favourite questions')} ${r.questions ? `<span class="count">${r.count} ${T('notes', 'ratings')}</span>` : ''}</div>
-      ${r.top.length ? `<div class="card qlist">${qList(r.top)}</div>` : `<div class="card empty" style="padding:18px">${T('Notez les questions (les étoiles sous les résultats) : les préférées du groupe apparaîtront ici.', 'Rate the questions (the stars under the results): the group’s favourites will show up here.')}</div>`}
-      ${r.flop.length ? `<div class="section-title">${T('Les flops', 'The flops')}</div><div class="card qlist">${qList(r.flop)}</div>` : ''}
+      <div class="section-title">${T('Les questions préférées', 'Favourite questions', 'Las preguntas favoritas')} ${r.questions ? `<span class="count">${r.count} ${T('notes', 'ratings', 'notas')}</span>` : ''}</div>
+      ${r.top.length ? `<div class="card qlist">${qList(r.top)}</div>` : `<div class="card empty" style="padding:18px">${T('Notez les questions (les étoiles sous les résultats) : les préférées du groupe apparaîtront ici.', 'Rate the questions (the stars under the results): the group’s favourites will show up here.', 'Puntuad las preguntas (las estrellitas debajo de los resultados): aquí saldrán las favoritas del grupo.')}</div>`}
+      ${r.flop.length ? `<div class="section-title">${T('Les flops', 'The flops', 'Las peores')}</div><div class="card qlist">${qList(r.flop)}</div>` : ''}
       ${r.sets.length ? `
-        <div class="section-title">${T('Sets les mieux notés', 'Best rated sets')}</div>
+        <div class="section-title">${T('Sets les mieux notés', 'Best rated sets', 'Sets mejor valorados')}</div>
         <div class="card qlist">${r.sets.map((x) => `<div class="qrow"><span>${esc(setOf(x.setId).emoji)} ${esc(setName(setOf(x.setId)))}</span><span class="q-rate">${stars(x.avg)}<small>${avgTxt(x.avg)} · ${x.n}</small></span></div>`).join('')}</div>` : ''}
       ${generous && harsh ? `
         <div class="duo-grid">
-          <div class="duo-tile static" style="--pc:${esc(player(generous.playerId).color)}"><span class="duo-head"><span class="duo-emoji">😇</span><span class="duo-title">${T('Le plus généreux', 'Most generous')}</span></span><span class="duo-who">${avatar(player(generous.playerId), 'sm')}<b class="pname">${esc(player(generous.playerId).name)}</b></span><span class="duo-line">${T('note en moyenne', 'rates')} ${avgTxt(generous.avg)}/5</span></div>
-          <div class="duo-tile static" style="--pc:${esc(player(harsh.playerId).color)}"><span class="duo-head"><span class="duo-emoji">🧐</span><span class="duo-title">${T('Le plus dur', 'Toughest critic')}</span></span><span class="duo-who">${avatar(player(harsh.playerId), 'sm')}<b class="pname">${esc(player(harsh.playerId).name)}</b></span><span class="duo-line">${T('note en moyenne', 'rates')} ${avgTxt(harsh.avg)}/5</span></div>
+          <div class="duo-tile static" style="--pc:${esc(player(generous.playerId).color)}"><span class="duo-head"><span class="duo-emoji">😇</span><span class="duo-title">${T('Le plus généreux', 'Most generous', 'El más generoso')}</span></span><span class="duo-who">${avatar(player(generous.playerId), 'sm')}<b class="pname">${esc(player(generous.playerId).name)}</b></span><span class="duo-line">${T('note en moyenne', 'rates', 'pone de media')} ${avgTxt(generous.avg)}/5</span></div>
+          <div class="duo-tile static" style="--pc:${esc(player(harsh.playerId).color)}"><span class="duo-head"><span class="duo-emoji">🧐</span><span class="duo-title">${T('Le plus dur', 'Toughest critic', 'El más duro')}</span></span><span class="duo-who">${avatar(player(harsh.playerId), 'sm')}<b class="pname">${esc(player(harsh.playerId).name)}</b></span><span class="duo-line">${T('note en moyenne', 'rates', 'pone de media')} ${avgTxt(harsh.avg)}/5</span></div>
         </div>` : ''}
-      ${gs.unanimous.length || gs.split.length ? `<div class="section-title">${T('Moments mémorables', 'Memorable moments')}</div>` : ''}
+      ${gs.unanimous.length || gs.split.length ? `<div class="section-title">${T('Moments mémorables', 'Memorable moments', 'Momentazos')}</div>` : ''}
       ${gs.unanimous.length ? `<div class="card qlist moments">${gs.unanimous.map((u) => `
         <div class="qrow"><span>${esc(qText(u))}</span><span class="moment-who">👑 ${avatar(player(u.target), 'xs')}<small>${u.n}/${u.n}</small></span></div>`).join('')}</div>` : ''}
       ${gs.split.length ? `<div class="card qlist moments">${gs.split.map((u) => `
-        <div class="qrow"><span>${esc(qText(u))}</span><span class="moment-who">🌪️<small>${T(`${u.n} avis`, `${u.n} answers`)}</small></span></div>`).join('')}</div>` : ''}`;
+        <div class="qrow"><span>${esc(qText(u))}</span><span class="moment-who">🌪️<small>${T(`${u.n} avis`, `${u.n} answers`, `${u.n} respuestas`)}</small></span></div>`).join('')}</div>` : ''}`;
   }
 
   // ---------- Séries (🔥) ----------
@@ -2502,40 +2517,86 @@
       .map((u) => ({ u, ...st.players[u.id] }))
       .sort((a, b) => b.current - a.current || b.best - a.best);
     openSheet(`
-      <div class="sheet-head"><h2>${T('Séries', 'Streaks')} 🔥</h2><button class="x" data-close>✕</button></div>
+      <div class="sheet-head"><h2>${T('Séries', 'Streaks', 'Rachas')} 🔥</h2><button class="x" data-close>✕</button></div>
       <div class="streak-duo">
         <div class="streak-big ${s.today === false ? 'pending' : ''}">
           <span class="sb-n">🔥 ${s.current}</span>
-          <span class="sb-l">${T('ta série', 'your streak')}</span>
-          <span class="sb-s">${s.today === false ? T('vote aujourd’hui pour la garder', 'vote today to keep it') : s.today ? T('✓ fait aujourd’hui', '✓ done today') : ''}${s.best ? ` · ${T('record', 'best')} ${s.best}` : ''}</span>
+          <span class="sb-l">${T('ta série', 'your streak', 'tu racha')}</span>
+          <span class="sb-s">${s.today === false ? T('vote aujourd’hui pour la garder', 'vote today to keep it', 'vota hoy para no perderla') : s.today ? T('✓ fait aujourd’hui', '✓ done today', '✓ hecho hoy') : ''}${s.best ? ` · ${T('record', 'best', 'récord')} ${s.best}` : ''}</span>
         </div>
         <div class="streak-big group ${g.today === false ? 'pending' : ''}">
           <span class="sb-n">🔥 ${g.current}</span>
-          <span class="sb-l">${T('série du groupe', 'group streak')}</span>
-          <span class="sb-s">${g.today === false && g.missing.length ? T('il manque : ', 'waiting for: ') + g.missing.map((id) => esc(player(id).name)).join(', ') : g.today ? T('✓ tout le monde a voté', '✓ everyone voted') : ''}${g.best ? ` · ${T('record', 'best')} ${g.best}` : ''}</span>
+          <span class="sb-l">${T('série du groupe', 'group streak', 'racha del grupo')}</span>
+          <span class="sb-s">${g.today === false && g.missing.length ? T('il manque : ', 'waiting for: ', 'faltan: ') + g.missing.map((id) => esc(player(id).name)).join(', ') : g.today ? T('✓ tout le monde a voté', '✓ everyone voted', '✓ todo el mundo ha votado') : ''}${g.best ? ` · ${T('record', 'best', 'récord')} ${g.best}` : ''}</span>
         </div>
       </div>
-      <p class="muted small">${T('Un jour compte si tu votes au moins une fois. Pour le groupe, il faut que tout le monde vote. Les jours sans question ne cassent rien.', 'A day counts if you vote at least once. For the group, everyone has to vote. Days without questions don’t break anything.')}</p>
+      <p class="muted small">${T('Un jour compte si tu votes au moins une fois. Pour le groupe, il faut que tout le monde vote. Les jours sans question ne cassent rien.', 'A day counts if you vote at least once. For the group, everyone has to vote. Days without questions don’t break anything.', 'Un día cuenta si votas al menos una vez. Para el grupo, tiene que votar todo el mundo. Los días sin preguntas no rompen la racha.')}</p>
       <div class="card qlist streak-list">${rows.map((r) => `
-        <div class="qrow">${avatar(r.u, 'sm')}<span class="name">${esc(r.u.name)}</span><span class="st-cur ${r.today === false ? 'off' : ''}">🔥 ${r.current}</span><span class="muted small st-best">${T('record', 'best')} ${r.best}</span></div>`).join('')}
+        <div class="qrow">${avatar(r.u, 'sm')}<span class="name">${esc(r.u.name)}</span><span class="st-cur ${r.today === false ? 'off' : ''}">🔥 ${r.current}</span><span class="muted small st-best">${T('record', 'best', 'récord')} ${r.best}</span></div>`).join('')}
       </div>`, () => {});
+  }
+
+  // ---------- Quiz : l'admin demande à tout le monde de répondre ----------
+  // Une fenêtre (une seule fois par demande) chez ceux qui n'ont pas encore répondu, ou en ouvrant la notif.
+  function quizPrompt() {
+    if (!state || !state.settings.profiles || state.me.quizDone) { pendingQuiz = false; return; }
+    const askedAt = state.quiz && state.quiz.askedAt;
+    const key = 'quizAskSeen_' + groupId;
+    const fromNotif = pendingQuiz;
+    pendingQuiz = false;
+    if (fromNotif) return go('quiz');
+    if (!askedAt || state.quiz.askedBy === state.me.playerId || Number(load(key) || 0) >= askedAt || !$sheet.hidden || chatOpen || storyOpen()) return;
+    save(key, String(askedAt));
+    openSheet(`
+      <div class="quiz-ask">
+        <div class="qa-emoji">🧩</div>
+        <h2>${T('Petit questionnaire', 'Quick questionnaire', 'Un cuestionario rapidito')}</h2>
+        <p class="muted">${T('L’admin aimerait que tout le monde réponde à quelques questions. Ça prend une minute, c’est anonyme, et les questions colleront mieux au groupe.', 'The admin would like everyone to answer a few questions. It takes a minute, it’s anonymous, and the questions will fit the group better.', 'Al admin le gustaría que todo el mundo respondiera unas preguntas. Es un minuto, es anónimo y las preguntas encajarán mejor con el grupo.')}</p>
+        <button class="btn btn-main btn-block" id="qaGo">${T('C’est parti', 'Let’s go', 'Vamos')}</button>
+        <button class="link-btn" data-close>${T('Plus tard', 'Later', 'Luego')}</button>
+      </div>`, (root) => {
+      root.querySelector('#qaGo').onclick = () => { closeSheet(); go('quiz'); };
+    });
+  }
+
+  // Carte admin : réponses reçues + bouton pour relancer tout le monde.
+  function quizAdminCard() {
+    const q = state.quiz || { answered: 0, members: 0, askedAt: null };
+    const all = q.members && q.answered >= q.members;
+    return `
+      <div class="quiz-admin">
+        <div class="qa-row"><span>${T('Réponses', 'Answers', 'Respuestas')}</span><b>${q.answered}/${q.members}</b></div>
+        <div class="qa-bar"><span style="width:${q.members ? Math.round((q.answered / q.members) * 100) : 0}%"></span></div>
+        ${q.askedAt ? `<p class="muted small" style="margin:6px 0 0">${T('Dernière demande', 'Last asked', 'Última petición')} : ${ago(q.askedAt)}</p>` : ''}
+        <button class="btn btn-soft btn-block" data-quizremind ${all ? 'disabled' : ''} style="margin-top:10px">📣 ${all ? T('Tout le monde a répondu 🎉', 'Everyone answered 🎉', 'Ya ha respondido todo el mundo 🎉') : T('Demander à tout le monde de répondre', 'Ask everyone to answer', 'Pedir a todo el mundo que responda')}</button>
+      </div>`;
+  }
+  function bindQuizAdmin(root) {
+    root.querySelectorAll('[data-quizremind]').forEach((b) => action(b, async () => {
+      const r = await api('POST', 'admin/quiz/remind');
+      state.quiz = r.quiz;
+      toast(r.sent
+        ? T(`Demande envoyée à ${plural(r.sent, 'personne')}`, `Sent to ${plural(r.sent, 'person', 'people')}`, `Enviado a ${plural(r.sent, 'persona')}`)
+        : T('Demande envoyée', 'Request sent', 'Petición enviada'));
+      renderView();
+    }));
   }
 
   // ---------- Quiz : questionnaire de profil (si l'admin l'a activé) ----------
   let quizData = null; // { items, mine, summary, effects }
   const TAG_LABELS = {
-    alcool: ['l’alcool', 'drinking'], soiree: ['les soirées', 'nights out'], couple: ['le couple', 'relationships'],
-    celib: ['la vie de célib', 'single life'], etudes: ['les études', 'studying'], travail: ['le boulot', 'work'],
-    gaming: ['les jeux vidéo', 'gaming'], sport: ['le sport', 'sport'], voiture: ['la conduite', 'driving'],
-    coloc: ['la coloc', 'flatshares'], parents: ['vivre chez ses parents', 'living with your parents'], enfants: ['les enfants', 'kids'],
-    homme: ['les mecs', 'guys'], femme: ['les filles', 'girls'], jeune: ['les plus jeunes', 'the youngest'], adulte: ['les plus âgés', 'the oldest'],
-    mixte: ['les groupes mixtes', 'mixed groups'],
+    alcool: ['l’alcool', 'drinking', 'el alcohol'], soiree: ['les soirées', 'nights out', 'las fiestas'], couple: ['le couple', 'relationships', 'la pareja'],
+    celib: ['la vie de célib', 'single life', 'la vida de soltero'], etudes: ['les études', 'studying', 'los estudios'], travail: ['le boulot', 'work', 'el curro'],
+    gaming: ['les jeux vidéo', 'gaming', 'los videojuegos'], sport: ['le sport', 'sport', 'el deporte'], voiture: ['la conduite', 'driving', 'conducir'],
+    coloc: ['la coloc', 'flatshares', 'el piso compartido'], parents: ['vivre chez ses parents', 'living with your parents', 'vivir con tus padres'], enfants: ['les enfants', 'kids', 'los hijos'],
+    homme: ['les mecs', 'guys', 'los tíos'], femme: ['les filles', 'girls', 'las chicas'], jeune: ['les plus jeunes', 'the youngest', 'los más jóvenes'], adulte: ['les plus âgés', 'the oldest', 'los mayores'],
+    mixte: ['les groupes mixtes', 'mixed groups', 'los grupos mixtos'],
   };
 
   async function renderQuiz(view) {
     if (!state.settings.profiles) { tab = 'live'; return renderView(); }
     if (!quizData || quizData.group !== groupId) {
-      view.innerHTML = `<div class="card empty">${T('Chargement…', 'Loading…')}</div>`;
+      view.innerHTML = `<div class="card empty">${T('Chargement…', 'Loading…', 'Cargando…')}</div>`;
       try {
         quizData = { ...(await api('GET', 'quiz')), group: groupId };
       } catch (e) {
@@ -2545,14 +2606,14 @@
       if (tab !== 'quiz') return;
     }
     const q = quizData;
-    const lab = (x) => (L ? x.en : x.fr);
+    const lab = (x) => (L ? x.en : ES ? x.es || x.en : x.fr);
     const sum = q.summary;
-    const more = Object.entries(q.effects || {}).filter(([, v]) => v >= 0.8).map(([t]) => TAG_LABELS[t] && TAG_LABELS[t][L ? 1 : 0]).filter(Boolean);
-    const less = Object.entries(q.effects || {}).filter(([, v]) => v <= 0.4).map(([t]) => TAG_LABELS[t] && TAG_LABELS[t][L ? 1 : 0]).filter(Boolean);
+    const more = Object.entries(q.effects || {}).filter(([, v]) => v >= 0.8).map(([t]) => TAG_LABELS[t] && TAG_LABELS[t][L ? 1 : ES ? 2 : 0]).filter(Boolean);
+    const less = Object.entries(q.effects || {}).filter(([, v]) => v <= 0.4).map(([t]) => TAG_LABELS[t] && TAG_LABELS[t][L ? 1 : ES ? 2 : 0]).filter(Boolean);
     view.innerHTML = `
       <div class="card quiz-intro">
-        <div class="card-title">${T('Qui êtes-vous ?', 'Who are you lot?')}</div>
-        <p class="muted small">${T('Quelques questions sur toi, pour que les questions du jeu collent mieux au groupe (et qu’on évite celles qui ne vous parlent pas). <b>Personne ne voit tes réponses</b> : seulement le résumé du groupe, à partir de 3 réponses. Tout est facultatif, et tu peux changer quand tu veux.', 'A few questions about you, so the game’s questions fit the group better (and the ones that don’t speak to you show up less). <b>Nobody sees your answers</b>: only the group summary, from 3 answers on. Everything is optional, and you can change it anytime.')}</p>
+        <div class="card-title">${T('Qui êtes-vous ?', 'Who are you lot?', '¿Quiénes sois?')}</div>
+        <p class="muted small">${T('Quelques questions sur toi, pour que les questions du jeu collent mieux au groupe (et qu’on évite celles qui ne vous parlent pas). <b>Personne ne voit tes réponses</b> : seulement le résumé du groupe, à partir de 3 réponses. Tout est facultatif, et tu peux changer quand tu veux.', 'A few questions about you, so the game’s questions fit the group better (and the ones that don’t speak to you show up less). <b>Nobody sees your answers</b>: only the group summary, from 3 answers on. Everything is optional, and you can change it anytime.', 'Unas cuantas preguntas sobre ti para que las del juego peguen más con el grupo (y salgan menos las que no van con vosotros). <b>Nadie ve tus respuestas</b>: solo el resumen del grupo, a partir de 3 respuestas. Todo es opcional y puedes cambiarlo cuando quieras.')}</p>
       </div>
       ${q.items.map((item) => `
         <div class="card quiz-item">
@@ -2561,12 +2622,14 @@
           ${sum.items[item.key] ? quizBar(item, sum.items[item.key], lab) : ''}
         </div>`).join('')}
       <div class="card">
-        <div class="card-title">${T('Le groupe', 'The group')} <span class="muted small">· ${T(`${sum.answered}/${sum.members} ont répondu`, `${sum.answered}/${sum.members} answered`)}</span></div>
-        ${sum.answered < 3 ? `<p class="muted small" style="margin:0">${T('Le résumé du groupe apparaît à partir de 3 réponses (pour que personne ne soit reconnu).', 'The group summary shows up from 3 answers (so nobody can be recognised).')}</p>` : ''}
-        ${more.length ? `<p class="small" style="margin:6px 0 0">⬆️ ${T('Plus souvent : ', 'More often: ')}${more.map(esc).join(', ')}</p>` : ''}
-        ${less.length ? `<p class="small" style="margin:6px 0 0">⬇️ ${T('Moins souvent : ', 'Less often: ')}${less.map(esc).join(', ')}</p>` : ''}
-        ${!more.length && !less.length ? `<p class="muted small" style="margin:6px 0 0">${T('Pas encore assez de réponses pour changer les questions.', 'Not enough answers yet to change the questions.')}</p>` : ''}
+        <div class="card-title">${T('Le groupe', 'The group', 'El grupo')} <span class="muted small">· ${T(`${sum.answered}/${sum.members} ont répondu`, `${sum.answered}/${sum.members} answered`, `${sum.answered}/${sum.members} han respondido`)}</span></div>
+        ${sum.answered < 3 ? `<p class="muted small" style="margin:0">${T('Le résumé du groupe apparaît à partir de 3 réponses (pour que personne ne soit reconnu).', 'The group summary shows up from 3 answers (so nobody can be recognised).', 'El resumen del grupo sale a partir de 3 respuestas (para que no se sepa quién es quién).')}</p>` : ''}
+        ${more.length ? `<p class="small" style="margin:6px 0 0">⬆️ ${T('Plus souvent : ', 'More often: ', 'Más a menudo: ')}${more.map(esc).join(', ')}</p>` : ''}
+        ${less.length ? `<p class="small" style="margin:6px 0 0">⬇️ ${T('Moins souvent : ', 'Less often: ', 'Menos a menudo: ')}${less.map(esc).join(', ')}</p>` : ''}
+        ${!more.length && !less.length ? `<p class="muted small" style="margin:6px 0 0">${T('Pas encore assez de réponses pour changer les questions.', 'Not enough answers yet to change the questions.', 'Aún no hay suficientes respuestas para cambiar las preguntas.')}</p>` : ''}
+        ${state.me.isAdmin ? quizAdminCard() : ''}
       </div>`;
+    bindQuizAdmin(view);
     view.querySelectorAll('[data-qk]').forEach((b) => (b.onclick = async () => {
       const k = b.dataset.qk;
       const v = b.dataset.qv;
@@ -2596,28 +2659,45 @@
 
   // ---------- Récap du mois (façon « Wrapped ») ----------
   const monthName = (m) => new Date(`${m}-15T12:00:00Z`).toLocaleDateString(LOC, { month: 'long', timeZone: 'UTC' });
-  const monthTitle = (m, partial) => (partial ? T(`${monthName(m)} (en cours)`, `${monthName(m)} (so far)`) : monthName(m));
+  const monthTitle = (m, partial) => (partial ? T(`${monthName(m)} (en cours)`, `${monthName(m)} (so far)`, `${monthName(m)} (en curso)`) : monthName(m));
 
+  // Récaps déjà ouverts sur cet appareil (par groupe) : les autres ont une pastille « nouveau ».
+  function seenRecaps() {
+    try { return new Set(JSON.parse(load('recapsSeen_' + groupId) || '[]')); } catch { return new Set(); }
+  }
+  function markRecapSeen(month) {
+    const seen = seenRecaps();
+    seen.add(month);
+    save('recapsSeen_' + groupId, JSON.stringify([...seen].slice(-36)));
+    save('recapSeen_' + groupId, month);
+  }
+  let recapsAll = false; // « voir les récaps plus anciens » déplié
+
+  // Tous les récaps du groupe (chaque mois avec des questions terminées), le plus récent en premier.
   function recapCards() {
-    const list = (state.recaps || []).slice(0, 4);
-    if (!list.length) return '';
+    const all = state.recaps || [];
+    if (!all.length) return '';
+    const seen = seenRecaps();
+    const list = recapsAll ? all : all.slice(0, 4);
     return `<div class="recap-list">${list.map((r, i) => `
-      <button class="recap-card ${i === 0 ? 'first' : ''}" data-recap="${r.month}">
+      <button class="recap-card ${i === 0 ? 'first' : ''} ${!r.partial && !seen.has(r.month) ? 'unseen' : ''}" data-recap="${r.month}">
         <span class="rc-emoji">${r.partial ? '📅' : '🎁'}</span>
-        <span class="rc-text"><b>${T('Récap de ', 'Recap: ')}${esc(monthTitle(r.month, r.partial))}</b><small>${r.partial ? T('Le mois jusqu’ici', 'The month so far') : T('Ton mois et celui du groupe', 'Your month and the group’s')}</small></span>
+        <span class="rc-text"><b>${T('Récap de ', 'Recap: ', 'Resumen de ')}${esc(monthTitle(r.month, r.partial))}</b><small>${r.partial ? T('Le mois jusqu’ici', 'The month so far', 'El mes hasta ahora') : T('Ton mois et celui du groupe', 'Your month and the group’s', 'Tu mes y el del grupo')}</small></span>
+        ${!r.partial && !seen.has(r.month) ? `<span class="rc-new">${T('nouveau', 'new', 'nuevo')}</span>` : ''}
         ${icon('down', 'rc-go')}
-      </button>`).join('')}</div>`;
+      </button>`).join('')}
+      ${all.length > 4 ? `<button class="link-btn recap-more" data-recapsall>${recapsAll ? T('Moins', 'Show less', 'Ver menos') : T(`Voir les récaps plus anciens (${all.length - 4})`, `See older recaps (${all.length - 4})`, `Ver resúmenes anteriores (${all.length - 4})`)}</button>` : ''}</div>`;
   }
 
   // Bandeau dans Live la première semaine du mois : le récap du mois dernier est prêt.
   function recapBanner() {
     const last = (state.recaps || []).find((r) => !r.partial);
-    if (!last || load('recapSeen_' + groupId) === last.month) return '';
+    if (!last || seenRecaps().has(last.month) || load('recapSeen_' + groupId) === last.month) return '';
     const d = new Date(now());
     const prev = new Date(d.getFullYear(), d.getMonth() - 1, 15);
     const prevKey = `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, '0')}`;
     if (last.month !== prevKey || d.getDate() > 10) return '';
-    return `<button class="recap-banner" data-recap="${last.month}">🎁 <span>${T(`Ton récap de <b>${esc(monthName(last.month))}</b> est prêt`, `Your <b>${esc(monthName(last.month))}</b> recap is ready`)}</span>${icon('down', 'rc-go')}</button>`;
+    return `<button class="recap-banner" data-recap="${last.month}">🎁 <span>${T(`Ton récap de <b>${esc(monthName(last.month))}</b> est prêt`, `Your <b>${esc(monthName(last.month))}</b> recap is ready`, `Tu resumen de <b>${esc(monthName(last.month))}</b> ya está listo`)}</span>${icon('down', 'rc-go')}</button>`;
   }
 
   function openRecapFromLink() {
@@ -2628,12 +2708,22 @@
   }
 
   const storyOpen = () => !!document.getElementById('story');
+  let storyStop = null; // arrête la lecture en cours (minuteur, écouteurs)
   function closeStory() {
+    if (storyStop) storyStop();
     const s = document.getElementById('story');
-    if (s) s.remove();
+    if (s) {
+      s.classList.add('closing');
+      setTimeout(() => s.remove(), calm() ? 0 : 220);
+    }
     document.body.classList.remove('noscroll');
+    if (state && tab === 'stats') renderView(); // la pastille « nouveau » du récap vu disparaît
   }
 
+  // Récap façon Spotify Wrapped : plein écran, les slides défilent toutes seules (barres qui se remplissent),
+  // tap à droite / à gauche pour avancer / reculer, appui long = pause, glisser vers le bas = fermer.
+  // Chaque slide arrive en plusieurs temps (éléments décalés, chiffres qui défilent, confettis sur les moments forts),
+  // et la star du mois se devine avant d'être révélée.
   async function openRecap(month) {
     let r;
     try {
@@ -2641,33 +2731,202 @@
     } catch (e) {
       return toast(e.message);
     }
-    save('recapSeen_' + groupId, month);
+    markRecapSeen(month);
     const slides = recapSlides(r);
-    if (!slides.length) return toast(T('Pas assez de questions ce mois-là pour un récap.', 'Not enough questions that month for a recap.'));
-    closeStory();
+    if (!slides.length) return toast(T('Pas assez de questions ce mois-là pour un récap.', 'Not enough questions that month for a recap.', 'Ese mes no hubo suficientes preguntas para hacer un resumen.'));
+    if (storyOpen()) { storyStop && storyStop(); document.getElementById('story').remove(); }
     const el = document.createElement('div');
     el.id = 'story';
     el.className = 'story';
+    el.innerHTML = `
+      <div class="story-blobs" aria-hidden="true"><i></i><i></i><i></i></div>
+      <div class="story-bars">${slides.map(() => '<span><i></i></span>').join('')}</div>
+      <div class="story-top"><span>${esc(state.group.name)} · ${esc(monthTitle(r.month, r.partial))}</span><button class="x" id="storyX" aria-label="${T('Fermer', 'Close', 'Cerrar')}">✕</button></div>
+      <div class="story-stage"></div>
+      <div class="story-hint"></div>`;
     document.body.appendChild(el);
     document.body.classList.add('noscroll');
+    const stage = el.querySelector('.story-stage');
+    const bars = [...el.querySelectorAll('.story-bars i')];
+    const hint = el.querySelector('.story-hint');
     let i = 0;
-    const draw = () => {
+    let t0 = 0; // début de la slide (temps écoulé déjà compté)
+    let elapsed = 0;
+    let paused = false;
+    let waiting = false; // slide « devine » : on attend la réponse
+    let raf = null;
+    let alive = true;
+    const dur = () => slides[i].dur || 6500;
+
+    const finish = () => (history.state && history.state.guard ? history.back() : closeStory());
+    const go = (to) => {
+      if (to < 0) to = 0;
+      if (to >= slides.length) return finish();
+      i = to;
+      show();
+    };
+
+    // Compte jusqu'au chiffre final (« 0 → 42 »).
+    const countUp = (root) => {
+      root.querySelectorAll('[data-count]').forEach((n) => {
+        const end = Number(n.dataset.count);
+        const suffix = n.dataset.suffix || '';
+        if (calm() || !Number.isFinite(end)) return;
+        const start = performance.now();
+        const D = 1100;
+        const step = (t) => {
+          if (!alive) return;
+          const k = Math.min(1, (t - start) / D);
+          const e = 1 - Math.pow(1 - k, 3);
+          n.textContent = Math.round(end * e) + suffix;
+          if (k < 1) requestAnimationFrame(step);
+        };
+        n.textContent = '0' + suffix;
+        requestAnimationFrame(step);
+      });
+    };
+
+    const show = () => {
       const s = slides[i];
       el.style.setProperty('--sg', s.bg);
-      el.innerHTML = `
-        <div class="story-bars">${slides.map((_, j) => `<span class="${j < i ? 'done' : j === i ? 'on' : ''}"></span>`).join('')}</div>
-        <div class="story-top"><span>${esc(state.group.name)} · ${esc(monthTitle(r.month, r.partial))}</span><button class="x" id="storyX" aria-label="${T('Fermer', 'Close')}">✕</button></div>
-        <div class="story-slide" key="${i}">${s.html}</div>
-        <div class="story-hint">${i < slides.length - 1 ? T('Touche pour continuer', 'Tap to continue') : T('Touche pour fermer', 'Tap to close')}</div>`;
-      el.querySelector('#storyX').onclick = (e) => { e.stopPropagation(); history.state && history.state.guard ? history.back() : closeStory(); };
+      el.classList.toggle('dark-text', !!s.darkText);
+      bars.forEach((b, j) => (b.style.transform = `scaleX(${j < i ? 1 : 0})`));
+      elapsed = 0;
+      t0 = performance.now();
+      waiting = !!s.guess;
+      stage.innerHTML = `<div class="story-slide">${s.guess ? guessHtml(s.guess) : s.html}</div>`;
+      const slide = stage.firstElementChild;
+      [...slide.children].forEach((c, k) => { c.classList.add('st-anim'); c.style.setProperty('--i', k); });
+      if (s.guess) bindGuess(slide, s);
+      else afterReveal(slide, s);
+      hint.textContent = s.guess
+        ? T('Devine ! Touche une photo', 'Guess! Tap a photo', '¡Adivina! Toca una foto')
+        : i < slides.length - 1 ? T('Touche pour continuer · reste appuyé pour pause', 'Tap to continue · hold to pause', 'Toca para seguir · mantén para pausar') : '';
+      if (navigator.vibrate && i) navigator.vibrate(8);
     };
-    el.onclick = (e) => {
-      const back = e.clientX < window.innerWidth * 0.3;
-      if (back) { if (i > 0) { i--; draw(); } return; }
-      if (i < slides.length - 1) { i++; draw(); } else if (history.state && history.state.guard) history.back(); else closeStory();
+
+    const afterReveal = (slide, s) => {
+      countUp(slide);
+      if (s.confetti && !calm()) setTimeout(() => alive && confetti(), 350);
+      slide.querySelectorAll('[data-share]').forEach((b) => (b.onclick = (e) => { e.stopPropagation(); shareRecap(r); }));
+      slide.querySelectorAll('[data-replay]').forEach((b) => (b.onclick = (e) => { e.stopPropagation(); go(0); }));
     };
-    draw();
+
+    // « Qui a été la star du mois ? » : on choisit une photo, puis la vraie réponse s'affiche.
+    const guessHtml = (g) => `
+      <div class="st-emoji">🤔</div>
+      <h2>${esc(g.question)}</h2>
+      <div class="guess-grid">${g.options.map((id) => `<button class="guess-opt" data-guess="${esc(id)}">${avatar(player(id), 'lg')}<span>${esc(id === state.me.playerId ? T('Toi', 'You', 'Tú') : player(id).name)}</span></button>`).join('')}</div>`;
+    const bindGuess = (slide, s) => {
+      slide.querySelectorAll('[data-guess]').forEach((b) => (b.onclick = (e) => {
+        e.stopPropagation();
+        if (!waiting) return;
+        waiting = false;
+        const right = b.dataset.guess === s.guess.answer;
+        slide.querySelectorAll('[data-guess]').forEach((x) => x.classList.add(x.dataset.guess === s.guess.answer ? 'right' : x === b ? 'wrong' : 'dim'));
+        if (navigator.vibrate) navigator.vibrate(right ? [10, 40, 10] : 30);
+        setTimeout(() => {
+          if (!alive || slides[i] !== s) return;
+          stage.innerHTML = `<div class="story-slide reveal"><p class="st-verdict ${right ? 'ok' : ''}">${right ? T('Bien vu ! 🎯', 'Spot on! 🎯', '¡Bien visto! 🎯') : T('Raté 😅', 'Nope 😅', 'Casi 😅')}</p>${s.html}</div>`;
+          const slide2 = stage.firstElementChild;
+          [...slide2.children].forEach((c, k) => { c.classList.add('st-anim'); c.style.setProperty('--i', k); });
+          afterReveal(slide2, { ...s, confetti: true });
+          t0 = performance.now();
+          elapsed = 0;
+          hint.textContent = T('Touche pour continuer', 'Tap to continue', 'Toca para seguir');
+        }, calm() ? 0 : 700);
+      }));
+    };
+
+    // Avance automatique : la barre de la slide en cours se remplit.
+    const tick = (t) => {
+      if (!alive) return;
+      if (!paused && !waiting && !document.hidden) {
+        const k = Math.min(1, (elapsed + (t - t0)) / dur());
+        if (bars[i]) bars[i].style.transform = `scaleX(${k})`;
+        if (k >= 1) {
+          if (i < slides.length - 1) go(i + 1);
+          else { elapsed = dur(); t0 = t; } // dernière slide : on reste dessus
+        }
+      } else t0 = t - 0; // le temps en pause ne compte pas
+      raf = requestAnimationFrame(tick);
+    };
+    const pause = (on) => {
+      if (on === paused) return;
+      if (on) elapsed += performance.now() - t0;
+      else t0 = performance.now();
+      paused = on;
+      el.classList.toggle('paused', on);
+    };
+
+    // Gestes : tap gauche/droite, appui long = pause, glisser vers le bas = fermer.
+    let down = null;
+    let holdTimer = null;
+    el.addEventListener('pointerdown', (e) => {
+      if (e.target.closest('button')) return;
+      down = { x: e.clientX, y: e.clientY, held: false };
+      holdTimer = setTimeout(() => { if (down) { down.held = true; pause(true); } }, 220);
+    });
+    el.addEventListener('pointermove', (e) => {
+      if (!down) return;
+      const dy = e.clientY - down.y;
+      if (dy > 0) el.style.transform = `translateY(${Math.min(dy, 200) * 0.6}px) scale(${1 - Math.min(dy, 200) / 2000})`;
+    });
+    const up = (e) => {
+      clearTimeout(holdTimer);
+      if (!down) return;
+      const d = down;
+      down = null;
+      el.style.transform = '';
+      const dy = e.clientY - d.y;
+      if (d.held) return pause(false);
+      if (dy > 90) return finish();
+      if (Math.abs(e.clientX - d.x) > 30 || Math.abs(dy) > 30) return;
+      if (waiting) return;
+      if (e.clientX < window.innerWidth * 0.3) go(i - 1);
+      else go(i + 1);
+    };
+    el.addEventListener('pointerup', up);
+    el.addEventListener('pointercancel', () => { clearTimeout(holdTimer); if (down && down.held) pause(false); down = null; el.style.transform = ''; });
+    el.addEventListener('contextmenu', (e) => e.preventDefault());
+    el.querySelector('#storyX').onclick = (e) => { e.stopPropagation(); finish(); };
+    const onKey = (e) => {
+      if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); if (!waiting) go(i + 1); }
+      else if (e.key === 'ArrowLeft') go(i - 1);
+    };
+    document.addEventListener('keydown', onKey);
+    storyStop = () => {
+      alive = false;
+      cancelAnimationFrame(raf);
+      document.removeEventListener('keydown', onKey);
+      storyStop = null;
+    };
+
+    show();
+    raf = requestAnimationFrame((t) => { t0 = t; tick(t); });
     syncGuard();
+  }
+
+  // Partager son récap : un petit texte (le téléphone propose WhatsApp, Insta, etc.).
+  async function shareRecap(r) {
+    const G = r.group;
+    const M = r.me;
+    const star = G.mvp.length ? player(G.mvp[0][0]).name : null;
+    const lines = [
+      `🎁 ${T('Récap', 'Recap', 'Resumen')} ${monthName(r.month)} · ${state.group.name}`,
+      `🗳️ ${G.polls} ${T('questions', 'questions', 'preguntas')} · ${G.participation}% ${T('de participation', 'turnout', 'de participación')}`,
+      star ? `👑 ${T('Star du mois', 'Star of the month', 'Estrella del mes')} : ${star}` : '',
+      G.unanimousCount ? `🤝 ${G.unanimousCount} ${T('unanimités', 'unanimous votes', 'unanimidades')}` : '',
+      M.voted ? `🫵 ${T('Moi', 'Me', 'Yo')} : ${M.wins} ${T('fois en tête', 'times on top', 'veces en cabeza')} · 🔥 ${M.streak}` : '',
+      `${location.origin}${langLink(LANG)}`,
+    ].filter(Boolean).join('\n');
+    try {
+      if (navigator.share) await navigator.share({ text: lines });
+      else {
+        await navigator.clipboard.writeText(lines);
+        toast(T('Copié, colle-le dans le groupe', 'Copied, paste it in the group', 'Copiado, pégalo en el grupo'));
+      }
+    } catch { /* annulé */ }
   }
 
   function recapSlides(r) {
@@ -2675,90 +2934,94 @@
     const M = r.me;
     const p = (id) => player(id);
     const big = (u) => `<div class="st-av">${avatar(u, 'xl')}</div>`;
-    const name = (u) => esc(u.id === state.me.playerId ? T('Toi', 'You') : u.name);
+    const name = (u) => esc(u.id === state.me.playerId ? T('Toi', 'You', 'Tú') : u.name);
     const q = (x) => `<p class="st-q">« ${esc(qText(x))} »</p>`;
     const statDef = M.topStat && state.statDefs.find((d) => d.key === M.topStat);
     const out = [];
-    const add = (bg, html) => out.push({ bg, html });
+    const add = (bg, html, extra = {}) => out.push({ bg, html, ...extra });
     if (!G.polls) return out;
     add('linear-gradient(160deg,#7b2ff7,#f107a3)', `
       <div class="st-emoji">🎁</div>
-      <h2>${T('Ton mois dans', 'Your month in')}<br><b>${esc(state.group.name)}</b></h2>
-      <p class="st-big">${G.polls}</p><p>${T('questions', 'questions')} · ${G.votes} ${T('votes', 'votes')}</p>
-      ${r.partial ? `<p class="st-small">${T('Le mois n’est pas fini : tout peut encore changer.', 'The month isn’t over: anything can still change.')}</p>` : ''}`);
+      <h2>${T('Ton mois dans', 'Your month in', 'Tu mes en')}<br><b>${esc(state.group.name)}</b></h2>
+      <p class="st-big" data-count="${G.polls}">${G.polls}</p><p>${T('questions', 'questions', 'preguntas')} · ${G.votes} ${T('votes', 'votes', 'votos')}</p>
+      ${r.partial ? `<p class="st-small">${T('Le mois n’est pas fini : tout peut encore changer.', 'The month isn’t over: anything can still change.', 'El mes aún no ha acabado: todo puede cambiar.')}</p>` : ''}`);
     add('linear-gradient(160deg,#ff7a00,#f107a3)', `
       <div class="st-emoji">🗳️</div>
-      <h2>${T('Participation', 'Turnout')}</h2>
-      <p class="st-big">${G.participation}%</p>
-      <p>${T('des votes possibles ont été faits', 'of possible votes were cast')}</p>
-      ${G.streak >= 2 ? `<p class="st-pill">🔥 ${T(`${G.streak} jours d’affilée où tout le monde a voté`, `${G.streak} days in a row where everyone voted`)}</p>` : ''}`);
+      <h2>${T('Participation', 'Turnout', 'Participación')}</h2>
+      <p class="st-big" data-count="${G.participation}" data-suffix="%">${G.participation}%</p>
+      <p>${T('des votes possibles ont été faits', 'of possible votes were cast', 'de todos los votos posibles')}</p>
+      ${G.streak >= 2 ? `<p class="st-pill">🔥 ${T(`${G.streak} jours d’affilée où tout le monde a voté`, `${G.streak} days in a row where everyone voted`, `${G.streak} días seguidos con todo el mundo votando`)}</p>` : ''}`);
     if (G.mvp.length) {
       const [id, n] = G.mvp[0];
+      // Devinette : la star + jusqu'à 3 autres membres, dans le désordre.
+      const others = state.players.filter((u) => u.claimed && u.id !== id).map((u) => u.id).sort(() => Math.random() - 0.5).slice(0, 3);
+      const guess = others.length >= 2 ? { answer: id, options: [id, ...others].sort(() => Math.random() - 0.5), question: T('Qui a été la star du mois ?', 'Who was the star of the month?', '¿Quién ha sido la estrella del mes?') } : null;
       add('linear-gradient(160deg,#3a5bff,#7b2ff7)', `
         <div class="st-emoji">👑</div>
-        <h2>${T('La star du mois', 'Star of the month')}</h2>
+        <h2>${T('La star du mois', 'Star of the month', 'La estrella del mes')}</h2>
         ${big(p(id))}
         <p class="st-name">${name(p(id))}</p>
-        <p>${T(`en tête sur ${n} question${n > 1 ? 's' : ''}`, `top of ${n} question${n > 1 ? 's' : ''}`)}</p>
-        ${G.mvp.length > 1 ? `<p class="st-small">${G.mvp.slice(1).map(([x, c]) => `${name(p(x))} (${c})`).join(' · ')}</p>` : ''}`);
+        <p>${T(`en tête sur ${n} question${n > 1 ? 's' : ''}`, `top of ${n} question${n > 1 ? 's' : ''}`, `primero en ${n} pregunta${n > 1 ? 's' : ''}`)}</p>
+        ${G.mvp.length > 1 ? `<p class="st-small">${G.mvp.slice(1).map(([x, c]) => `${name(p(x))} (${c})`).join(' · ')}</p>` : ''}`, { guess, confetti: true });
     }
     if (G.unanimousCount) {
       add('linear-gradient(160deg,#ffbe0b,#ff7a00)', `
         <div class="st-emoji">🤝</div>
-        <h2>${T(`${G.unanimousCount} unanimité${G.unanimousCount > 1 ? 's' : ''}`, `${G.unanimousCount} unanimous vote${G.unanimousCount > 1 ? 's' : ''}`)}</h2>
+        <h2>${T(`${G.unanimousCount} unanimité${G.unanimousCount > 1 ? 's' : ''}`, `${G.unanimousCount} unanimous vote${G.unanimousCount > 1 ? 's' : ''}`, `${G.unanimousCount} unanimidad${G.unanimousCount > 1 ? 'es' : ''}`)}</h2>
         <div class="st-list">${G.unanimous.slice(0, 3).map((u) => `<div class="st-li">${avatar(p(u.target), 'sm')}<span>${esc(qText(u))}</span></div>`).join('')}</div>
-        ${G.split ? `<p class="st-small">🌪️ ${T(`Et ${G.split} fois, personne n’était d’accord.`, `And ${G.split} times, nobody agreed.`)}</p>` : ''}`);
+        ${G.split ? `<p class="st-small">🌪️ ${T(`Et ${G.split} fois, personne n’était d’accord.`, `And ${G.split} times, nobody agreed.`, `Y ${G.split} veces nadie estuvo de acuerdo.`)}</p>` : ''}`, { confetti: true, dur: 8000 });
     }
     if (G.bestQuestion) {
       add('linear-gradient(160deg,#12b76a,#00a8e8)', `
         <div class="st-emoji">⭐</div>
-        <h2>${T('La question préférée', 'Favourite question')}</h2>
+        <h2>${T('La question préférée', 'Favourite question', 'La pregunta favorita')}</h2>
         ${q(G.bestQuestion)}
-        <p>${String(G.bestQuestion.avg).replace('.', L ? '.' : ',')}/5 · ${G.bestQuestion.n} ${T('notes', 'ratings')}</p>
-        ${G.worstQuestion && G.worstQuestion.avg < G.bestQuestion.avg ? `<p class="st-small">${T('Le flop', 'The flop')} : « ${esc(qText(G.worstQuestion))} » (${String(G.worstQuestion.avg).replace('.', L ? '.' : ',')}/5)</p>` : ''}`);
+        <p>${String(G.bestQuestion.avg).replace('.', L ? '.' : ',')}/5 · ${G.bestQuestion.n} ${T('notes', 'ratings', 'notas')}</p>
+        ${G.worstQuestion && G.worstQuestion.avg < G.bestQuestion.avg ? `<p class="st-small">${T('Le flop', 'The flop', 'La peor')} : « ${esc(qText(G.worstQuestion))} » (${String(G.worstQuestion.avg).replace('.', L ? '.' : ',')}/5)</p>` : ''}`);
     }
     if (G.messages) {
       const top = G.topChatter[0];
       add('linear-gradient(160deg,#00b8a9,#3a5bff)', `
         <div class="st-emoji">💬</div>
-        <h2>${G.messages} ${T('messages', 'messages')}</h2>
-        ${top ? `${big(p(top[0]))}<p class="st-name">${name(p(top[0]))}</p><p>${T(`le/la plus bavard·e : ${top[1]} messages`, `the chattiest: ${top[1]} messages`)}</p>` : ''}
-        ${G.bestMsg ? `<div class="st-msg"><b>${esc(p(G.bestMsg.playerId).name)}</b> ${G.bestMsg.text ? esc(G.bestMsg.text) : G.bestMsg.kind === 'gif' ? 'GIF' : '📷'}<span>${G.bestMsg.emojis.join('')} ${G.bestMsg.reactions}</span></div><p class="st-small">${T('le message le plus réagi', 'the most reacted message')}</p>` : ''}`);
+        <h2>${G.messages} ${T('messages', 'messages', 'mensajes')}</h2>
+        ${top ? `${big(p(top[0]))}<p class="st-name">${name(p(top[0]))}</p><p>${T(`le/la plus bavard·e : ${top[1]} messages`, `the chattiest: ${top[1]} messages`, `quien más habla: ${top[1]} mensajes`)}</p>` : ''}
+        ${G.bestMsg ? `<div class="st-msg"><b>${esc(p(G.bestMsg.playerId).name)}</b> ${G.bestMsg.text ? esc(G.bestMsg.text) : G.bestMsg.kind === 'gif' ? 'GIF' : '📷'}<span>${G.bestMsg.emojis.join('')} ${G.bestMsg.reactions}</span></div><p class="st-small">${T('le message le plus réagi', 'the most reacted message', 'el mensaje con más reacciones')}</p>` : ''}`);
     }
     const fun = [];
-    if (G.nightOwl) fun.push(`<div class="st-li">${avatar(p(G.nightOwl[0]), 'sm')}<span>🦉 <b>${name(p(G.nightOwl[0]))}</b> · ${T('le plus actif entre minuit et 5 h', 'most active between midnight and 5am')}</span></div>`);
-    if (G.fastest) fun.push(`<div class="st-li">${avatar(p(G.fastest[0]), 'sm')}<span>⚡ <b>${name(p(G.fastest[0]))}</b> · ${T(`vote en ${durTxt(G.fastest[1])} en moyenne`, `votes within ${durTxt(G.fastest[1])} on average`)}</span></div>`);
-    if (G.slowest) fun.push(`<div class="st-li">${avatar(p(G.slowest[0]), 'sm')}<span>🐢 <b>${name(p(G.slowest[0]))}</b> · ${T(`prend son temps : ${durTxt(G.slowest[1])}`, `takes their time: ${durTxt(G.slowest[1])}`)}</span></div>`);
-    if (G.bestCustom) fun.push(`<div class="st-li">${avatar(p(G.bestCustom.author), 'sm')}<span>✍️ ${T('Meilleure question perso', 'Best own question')} : « ${esc(qText(G.bestCustom))} »</span></div>`);
-    if (fun.length) add('linear-gradient(160deg,#5a189a,#c21fd6)', `<div class="st-emoji">🏅</div><h2>${T('Mentions spéciales', 'Special mentions')}</h2><div class="st-list">${fun.join('')}</div>`);
+    if (G.nightOwl) fun.push(`<div class="st-li">${avatar(p(G.nightOwl[0]), 'sm')}<span>🦉 <b>${name(p(G.nightOwl[0]))}</b> · ${T('le plus actif entre minuit et 5 h', 'most active between midnight and 5am', 'el más activo entre medianoche y las 5')}</span></div>`);
+    if (G.fastest) fun.push(`<div class="st-li">${avatar(p(G.fastest[0]), 'sm')}<span>⚡ <b>${name(p(G.fastest[0]))}</b> · ${T(`vote en ${durTxt(G.fastest[1])} en moyenne`, `votes within ${durTxt(G.fastest[1])} on average`, `vota en ${durTxt(G.fastest[1])} de media`)}</span></div>`);
+    if (G.slowest) fun.push(`<div class="st-li">${avatar(p(G.slowest[0]), 'sm')}<span>🐢 <b>${name(p(G.slowest[0]))}</b> · ${T(`prend son temps : ${durTxt(G.slowest[1])}`, `takes their time: ${durTxt(G.slowest[1])}`, `se lo toma con calma: ${durTxt(G.slowest[1])}`)}</span></div>`);
+    if (G.bestCustom) fun.push(`<div class="st-li">${avatar(p(G.bestCustom.author), 'sm')}<span>✍️ ${T('Meilleure question perso', 'Best own question', 'Mejor pregunta propia')} : « ${esc(qText(G.bestCustom))} »</span></div>`);
+    if (fun.length) add('linear-gradient(160deg,#5a189a,#c21fd6)', `<div class="st-emoji">🏅</div><h2>${T('Mentions spéciales', 'Special mentions', 'Menciones especiales')}</h2><div class="st-list">${fun.join('')}</div>`, { dur: 8500 });
     // --- Toi ---
     if (M.voted) {
       add('linear-gradient(160deg,#f107a3,#ff7a00)', `
         <div class="st-emoji">🫵</div>
-        <h2>${T('Et toi ?', 'And you?')}</h2>
-        <p class="st-big">${M.wins}</p>
-        <p>${T(`question${M.wins > 1 ? 's' : ''} où tu étais en tête`, `question${M.wins === 1 ? '' : 's'} where you came top`)}${M.winRank ? T(` · ${M.winRank}e du groupe`, ` · #${M.winRank} in the group`) : ''}</p>
+        <h2>${T('Et toi ?', 'And you?', '¿Y tú?')}</h2>
+        <p class="st-big" data-count="${M.wins}">${M.wins}</p>
+        <p>${T(`question${M.wins > 1 ? 's' : ''} où tu étais en tête`, `question${M.wins === 1 ? '' : 's'} where you came top`, `pregunta${M.wins === 1 ? '' : 's'} donde ibas primero`)}${M.winRank ? T(` · ${M.winRank}e du groupe`, ` · #${M.winRank} in the group`, ` · ${M.winRank}.º del grupo`) : ''}</p>
         ${M.winList.length ? `<div class="st-list">${M.winList.slice(0, 4).map((w) => `<div class="st-li"><span>« ${esc(qText(w))} »</span></div>`).join('')}</div>` : ''}
-        ${M.unanimous.length ? `<p class="st-pill">👑 ${T(`${M.unanimous.length} unanimité${M.unanimous.length > 1 ? 's' : ''} sur toi`, `${M.unanimous.length} unanimous vote${M.unanimous.length > 1 ? 's' : ''} on you`)}</p>` : ''}`);
+        ${M.unanimous.length ? `<p class="st-pill">👑 ${T(`${M.unanimous.length} unanimité${M.unanimous.length > 1 ? 's' : ''} sur toi`, `${M.unanimous.length} unanimous vote${M.unanimous.length > 1 ? 's' : ''} on you`, `${M.unanimous.length} unanimidad${M.unanimous.length > 1 ? 'es' : ''} con tu nombre`)}</p>` : ''}`);
       const duo = [];
-      if (M.fan) duo.push(`<div class="st-li">${avatar(p(M.fan[0]), 'sm')}<span>💘 <b>${name(p(M.fan[0]))}</b> · ${T(`ton plus grand fan (${num(M.fan[1])} votes pour toi)`, `your biggest fan (${num(M.fan[1])} votes for you)`)}</span></div>`);
-      if (M.target) duo.push(`<div class="st-li">${avatar(p(M.target[0]), 'sm')}<span>🎯 <b>${name(p(M.target[0]))}</b> · ${T(`ta cible préférée (${num(M.target[1])} votes)`, `your favourite target (${num(M.target[1])} votes)`)}</span></div>`);
-      if (M.twin) duo.push(`<div class="st-li">${avatar(p(M.twin[0]), 'sm')}<span>👯 <b>${name(p(M.twin[0]))}</b> · ${T(`même vote que toi ${M.twin[1]} % du temps`, `same vote as you ${M.twin[1]}% of the time`)}</span></div>`);
-      if (M.selfVotes) duo.push(`<div class="st-li"><span>🪞 ${T(`${num(M.selfVotes)} vote${M.selfVotes > 1 ? 's' : ''} pour toi-même`, `${num(M.selfVotes)} vote${M.selfVotes > 1 ? 's' : ''} for yourself`)}</span></div>`);
-      if (duo.length) add('linear-gradient(160deg,#ff2e88,#7b2ff7)', `<div class="st-emoji">💞</div><h2>${T('Tes affinités du mois', 'Your month’s connections')}</h2><div class="st-list">${duo.join('')}</div>`);
+      if (M.fan) duo.push(`<div class="st-li">${avatar(p(M.fan[0]), 'sm')}<span>💘 <b>${name(p(M.fan[0]))}</b> · ${T(`ton plus grand fan (${num(M.fan[1])} votes pour toi)`, `your biggest fan (${num(M.fan[1])} votes for you)`, `tu fan n.º 1 (${num(M.fan[1])} votos para ti)`)}</span></div>`);
+      if (M.target) duo.push(`<div class="st-li">${avatar(p(M.target[0]), 'sm')}<span>🎯 <b>${name(p(M.target[0]))}</b> · ${T(`ta cible préférée (${num(M.target[1])} votes)`, `your favourite target (${num(M.target[1])} votes)`, `tu víctima favorita (${num(M.target[1])} votos)`)}</span></div>`);
+      if (M.twin) duo.push(`<div class="st-li">${avatar(p(M.twin[0]), 'sm')}<span>👯 <b>${name(p(M.twin[0]))}</b> · ${T(`même vote que toi ${M.twin[1]} % du temps`, `same vote as you ${M.twin[1]}% of the time`, `mismo voto que tú el ${M.twin[1]} % de las veces`)}</span></div>`);
+      if (M.selfVotes) duo.push(`<div class="st-li"><span>🪞 ${T(`${num(M.selfVotes)} vote${M.selfVotes > 1 ? 's' : ''} pour toi-même`, `${num(M.selfVotes)} vote${M.selfVotes > 1 ? 's' : ''} for yourself`, `${num(M.selfVotes)} autovoto${M.selfVotes > 1 ? 's' : ''}`)}</span></div>`);
+      if (duo.length) add('linear-gradient(160deg,#ff2e88,#7b2ff7)', `<div class="st-emoji">💞</div><h2>${T('Tes affinités du mois', 'Your month’s connections', 'Tus afinidades del mes')}</h2><div class="st-list">${duo.join('')}</div>`, { dur: 8500 });
       add('linear-gradient(160deg,#1d3557,#3a5bff)', `
         <div class="st-emoji">${statDef ? statDef.emoji : '✨'}</div>
-        <h2>${T('Ton mois en un mot', 'Your month in a word')}</h2>
+        <h2>${T('Ton mois en un mot', 'Your month in a word', 'Tu mes en una palabra')}</h2>
         <p class="st-big st-word">${statDef ? esc(statLabel(statDef)) : '—'}</p>
         <div class="st-facts">
-          <span><b>${M.voted}/${G.polls}</b>${T('votes', 'votes')}</span>
-          <span><b>🔥 ${M.streak}</b>${T('meilleure série', 'best streak')}</span>
-          <span><b>${M.messages}</b>${T('messages', 'messages')}</span>
-          <span><b>${M.reactions}</b>${T('réactions reçues', 'reactions got')}</span>
+          <span><b>${M.voted}/${G.polls}</b>${T('votes', 'votes', 'votos')}</span>
+          <span><b>🔥 ${M.streak}</b>${T('meilleure série', 'best streak', 'mejor racha')}</span>
+          <span><b>${M.messages}</b>${T('messages', 'messages', 'mensajes')}</span>
+          <span><b>${M.reactions}</b>${T('réactions reçues', 'reactions got', 'reacciones recibidas')}</span>
         </div>
-        ${M.speed != null ? `<p class="st-small">${T(`Tu votes en ${durTxt(M.speed)} en moyenne`, `You vote within ${durTxt(M.speed)} on average`)}</p>` : ''}`);
+        ${M.speed != null ? `<p class="st-small">${T(`Tu votes en ${durTxt(M.speed)} en moyenne`, `You vote within ${durTxt(M.speed)} on average`, `Votas en ${durTxt(M.speed)} de media`)}</p>` : ''}`);
     }
-    add('linear-gradient(160deg,#7b2ff7,#00a8e8)', `<div class="st-emoji">👋</div><h2>${r.partial ? T('Rendez-vous à la fin du mois', 'See you at the end of the month') : T('Au mois prochain !', 'See you next month!')}</h2><p>${T('Fais une capture pour la partager au groupe 📸', 'Take a screenshot to share it with the group 📸')}</p>`);
+    add('linear-gradient(160deg,#7b2ff7,#00a8e8)', `<div class="st-emoji">👋</div><h2>${r.partial ? T('Rendez-vous à la fin du mois', 'See you at the end of the month', 'Nos vemos a final de mes') : T('Au mois prochain !', 'See you next month!', '¡Hasta el mes que viene!')}</h2><p>${T('Fais une capture pour la partager au groupe 📸', 'Take a screenshot to share it with the group 📸', 'Haz una captura para compartirla con el grupo 📸')}</p>
+      <div class="st-actions"><button class="st-btn" data-share>${T('Partager', 'Share', 'Compartir')} 📤</button><button class="st-btn ghost" data-replay>${T('Revoir', 'Replay', 'Volver a ver')} ↺</button></div>`, { dur: 60000 });
     return out;
   }
 
@@ -2767,7 +3030,7 @@
     const m = Math.round(min);
     if (m < 60) return `${m} min`;
     const h = Math.floor(m / 60);
-    return h < 48 ? `${h} h${m % 60 ? ' ' + String(m % 60).padStart(2, '0') : ''}` : T(`${Math.round(h / 24)} j`, `${Math.round(h / 24)} days`);
+    return h < 48 ? `${h} h${m % 60 ? ' ' + String(m % 60).padStart(2, '0') : ''}` : T(`${Math.round(h / 24)} j`, `${Math.round(h / 24)} days`, `${Math.round(h / 24)} d`);
   }
 
   // ---------- Glisser pour changer d'onglet ----------
@@ -2868,7 +3131,7 @@
   })();
 
   // ---------- Nouveautés & avis ----------
-  // Deux petits liens discrets en bas de Moi (et de l'accueil). Une pastille rose quand il y a du nouveau.
+  // Deux boutons en haut de Moi (et au-dessus de « Mon compte » sur l'accueil). Une pastille rose quand il y a du nouveau.
   let releases = null;
   const latestNews = () => (state && state.latestNews) || (account && account.latestNews) || null;
   const newsUnseen = () => !!latestNews() && load('newsSeen') !== latestNews();
@@ -2876,8 +3139,8 @@
   function aboutLinks() {
     return `
       <div class="about-links">
-        <button class="link-btn" data-news>✨ ${T('Nouveautés', 'What’s new')}${newsUnseen() ? '<span class="dot-new"></span>' : ''}</button>
-        <button class="link-btn" data-feedback>💬 ${T('Un bug ? Un avis ?', 'Bug? Feedback?')}</button>
+        <button class="link-btn" data-news>✨ ${T('Nouveautés', 'What’s new', 'Novedades')}${newsUnseen() ? '<span class="dot-new"></span>' : ''}</button>
+        <button class="link-btn" data-feedback>💬 ${T('Un bug ? Un avis ?', 'Bug? Feedback?', '¿Un bug? ¿Algo que decir?')}</button>
       </div>`;
   }
   function bindAbout(root) {
@@ -2897,13 +3160,13 @@
     document.querySelectorAll('[data-news] .dot-new').forEach((d) => d.remove());
     const fmt = (d) => new Date(d + 'T12:00:00Z').toLocaleDateString(LOC, { day: 'numeric', month: 'long', timeZone: 'UTC' });
     openSheet(`
-      <div class="sheet-head"><h2>✨ ${T('Nouveautés', 'What’s new')}</h2><button class="x" data-close>✕</button></div>
+      <div class="sheet-head"><h2>✨ ${T('Nouveautés', 'What’s new', 'Novedades')}</h2><button class="x" data-close>✕</button></div>
       ${releases.map((r, i) => `
         <div class="patch ${seenIdx < 0 ? (i === 0 ? 'new' : '') : i < seenIdx ? 'new' : ''}">
-          <div class="patch-head"><b>${esc(r.title[L ? 'en' : 'fr'])}</b><span class="muted small">${fmt(r.date)}</span></div>
-          <ul>${(L ? r.en : r.fr).map((l) => `<li>${esc(l)}</li>`).join('')}</ul>
+          <div class="patch-head"><b>${esc(r.title[LANG] || r.title.en)}</b><span class="muted small">${fmt(r.date)}</span></div>
+          <ul>${(r[LANG] || r.en).map((l) => `<li>${esc(l)}</li>`).join('')}</ul>
         </div>`).join('')}
-      <button class="btn btn-soft btn-block" id="newsFb" style="margin-top:12px">💬 ${T('Un bug ? Une idée ? Dis-le nous', 'A bug? An idea? Tell us')}</button>`, (root) => {
+      <button class="btn btn-soft btn-block" id="newsFb" style="margin-top:12px">💬 ${T('Un bug ? Une idée ? Dis-le nous', 'A bug? An idea? Tell us', '¿Un bug? ¿Una idea? Cuéntanos')}</button>`, (root) => {
       root.querySelector('#newsFb').onclick = () => openFeedback();
     });
   }
@@ -2913,14 +3176,14 @@
     let text = load('fbDraft') || '';
     const owner = !!(account && account.account && account.account.owner);
     const draw = () => openSheet(`
-      <div class="sheet-head"><h2>💬 ${T('Un bug ? Un avis ?', 'Bug? Feedback?')}</h2><button class="x" data-close>✕</button></div>
-      <p class="muted small" style="margin:0 0 10px">${T('Ça part directement au développeur. Dis ce que tu faisais, ce qui s’est passé, et sur quel téléphone si c’est un bug.', 'It goes straight to the developer. Say what you were doing, what happened, and which phone if it’s a bug.')}</p>
+      <div class="sheet-head"><h2>💬 ${T('Un bug ? Un avis ?', 'Bug? Feedback?', '¿Un bug? ¿Algo que decir?')}</h2><button class="x" data-close>✕</button></div>
+      <p class="muted small" style="margin:0 0 10px">${T('Ça part directement au développeur. Dis ce que tu faisais, ce qui s’est passé, et sur quel téléphone si c’est un bug.', 'It goes straight to the developer. Say what you were doing, what happened, and which phone if it’s a bug.', 'Le llega directo al desarrollador. Cuenta qué estabas haciendo, qué ha pasado y con qué móvil, si es un bug.')}</p>
       <div class="fb-kinds">
-        ${[['bug', T('🐞 Bug', '🐞 Bug')], ['idea', T('💡 Idée', '💡 Idea')], ['other', T('💬 Autre', '💬 Other')]].map(([k, l]) => `<button class="chip ${kind === k ? 'on' : ''}" data-kind="${k}">${l}</button>`).join('')}
+        ${[['bug', T('🐞 Bug', '🐞 Bug', '🐞 Bug')], ['idea', T('💡 Idée', '💡 Idea', '💡 Idea')], ['other', T('💬 Autre', '💬 Other', '💬 Otro')]].map(([k, l]) => `<button class="chip ${kind === k ? 'on' : ''}" data-kind="${k}">${l}</button>`).join('')}
       </div>
-      <textarea class="input" id="fbText" maxlength="2000" placeholder="${kind === 'bug' ? T('Ex : quand je touche…, l’app…', 'e.g. when I tap…, the app…') : T('Ton idée, ton avis…', 'Your idea, your thoughts…')}">${esc(text)}</textarea>
-      <button class="btn btn-main btn-block" id="fbGo">${T('Envoyer', 'Send')}</button>
-      ${owner ? `<button class="btn btn-soft btn-block" id="fbList" style="margin-top:10px">${T('Voir les avis reçus', 'See feedback received')}</button><div id="fbItems"></div>` : ''}`, (root) => {
+      <textarea class="input" id="fbText" maxlength="2000" placeholder="${kind === 'bug' ? T('Ex : quand je touche…, l’app…', 'e.g. when I tap…, the app…', 'Ej.: cuando toco…, la app…') : T('Ton idée, ton avis…', 'Your idea, your thoughts…', 'Tu idea, tu opinión…')}">${esc(text)}</textarea>
+      <button class="btn btn-main btn-block" id="fbGo">${T('Envoyer', 'Send', 'Enviar')}</button>
+      ${owner ? `<button class="btn btn-soft btn-block" id="fbList" style="margin-top:10px">${T('Voir les avis reçus', 'See feedback received', 'Ver opiniones recibidas')}</button><div id="fbItems"></div>` : ''}`, (root) => {
       const area = root.querySelector('#fbText');
       area.oninput = () => { text = area.value; save('fbDraft', text || null); };
       root.querySelectorAll('[data-kind]').forEach((b) => (b.onclick = () => { text = area.value; kind = b.dataset.kind; save('fbKind', kind); draw(); }));
@@ -2928,14 +3191,14 @@
         await api('POST', 'feedback', { kind, text: area.value, groupId: groupId || undefined });
         save('fbDraft', null);
         closeSheet();
-        toast(T('Merci ! C’est envoyé 🙏', 'Thanks! Sent 🙏'));
+        toast(T('Merci ! C’est envoyé 🙏', 'Thanks! Sent 🙏', '¡Gracias! Enviado 🙏'));
       });
       const showList = async () => {
         const { items } = await api('GET', 'feedback');
         const box = root.querySelector('#fbItems');
         if (!box) return;
         box.innerHTML = items.length ? `<div class="card qlist fb-list" style="margin-top:12px">${items.map((x) => `
-          <div class="qrow"><b>${{ bug: '🐞', idea: '💡', other: '💬' }[x.kind] || '💬'} ${esc(x.name || x.username || '?')}${x.group ? ` · ${esc(x.group)}` : ''}</b><span>${esc(x.text)}</span><span class="muted small">${ago(x.at)} · ${esc(x.version || '')} · ${esc((x.ua.match(/\(([^)]*)\)/) || [])[1] || '')}</span></div>`).join('')}</div>` : `<p class="muted small">${T('Rien pour l’instant.', 'Nothing yet.')}</p>`;
+          <div class="qrow"><b>${{ bug: '🐞', idea: '💡', other: '💬' }[x.kind] || '💬'} ${esc(x.name || x.username || '?')}${x.group ? ` · ${esc(x.group)}` : ''}</b><span>${esc(x.text)}</span><span class="muted small">${ago(x.at)} · ${esc(x.version || '')} · ${esc((x.ua.match(/\(([^)]*)\)/) || [])[1] || '')}</span></div>`).join('')}</div>` : `<p class="muted small">${T('Rien pour l’instant.', 'Nothing yet.', 'Nada por ahora.')}</p>`;
       };
       const lb = root.querySelector('#fbList');
       if (lb) action(lb, showList);
@@ -2959,58 +3222,59 @@
     const pushOk = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window && vapid();
 
     view.innerHTML = `
+      ${aboutLinks()}
       <div class="card" id="profileCard">
         <div class="profile-row">
-          <button class="photo-btn" id="photoBtn" aria-label="${T('Changer ma photo', 'Change my photo')}">${avatar(m, 'lg')}<span class="photo-edit">${icon('edit')}</span></button>
+          <button class="photo-btn" id="photoBtn" aria-label="${T('Changer ma photo', 'Change my photo', 'Cambiar mi foto')}">${avatar(m, 'lg')}<span class="photo-edit">${icon('edit')}</span></button>
           <div class="profile-text">
             <b>${esc(m.name)}</b>
-            <span class="muted small">${state.me.isAdmin ? T('Admin du groupe', 'Group admin') : T('Membre du groupe', 'Group member')}</span>
+            <span class="muted small">${state.me.isAdmin ? T('Admin du groupe', 'Group admin', 'Admin del grupo') : T('Membre du groupe', 'Group member', 'Miembro del grupo')}</span>
             <span class="photo-links">
-              <button class="link-btn" id="photoBtn2">${m.photo ? T('Changer la photo', 'Change photo') : T('Ajouter une photo', 'Add a photo')}</button>
-              ${m.photo ? `<button class="link-btn muted" id="photoDel">${T('Retirer', 'Remove')}</button>` : ''}
+              <button class="link-btn" id="photoBtn2">${m.photo ? T('Changer la photo', 'Change photo', 'Cambiar la foto') : T('Ajouter une photo', 'Add a photo', 'Añadir una foto')}</button>
+              ${m.photo ? `<button class="link-btn muted" id="photoDel">${T('Retirer', 'Remove', 'Quitar')}</button>` : ''}
             </span>
           </div>
         </div>
-        <label for="myName">${T('Pseudo', 'Name')}</label>
+        <label for="myName">${T('Pseudo', 'Name', 'Nombre')}</label>
         <div class="inline-form">
           <input class="input" id="myName" maxlength="24" value="${esc(m.name)}">
           <button class="btn btn-soft" id="saveName">OK</button>
         </div>
-        <label>${T('Ta couleur', 'Your color')}</label>
+        <label>${T('Ta couleur', 'Your color', 'Tu color')}</label>
         ${colorPicker(m)}
       </div>
 
       <div class="card">
-        <div class="card-title lang-title"><span>${T('Langue', 'Language')}</span>${langSwitch()}</div>
-        <p class="muted small" style="margin:0">${T('Les questions intégrées, les menus et tes notifications passent dans cette langue.', 'Built-in questions, menus and your notifications switch to this language.')}</p>
+        <div class="card-title lang-title"><span>${T('Langue', 'Language', 'Idioma')}</span>${langSwitch()}</div>
+        <p class="muted small" style="margin:0">${T('Les questions intégrées, les menus et tes notifications passent dans cette langue.', 'Built-in questions, menus and your notifications switch to this language.', 'Las preguntas de la app, los menús y tus notificaciones pasan a este idioma.')}</p>
       </div>
 
       <div class="card">
-        <div class="card-title">${T('Groupe', 'Group')}</div>
+        <div class="card-title">${T('Groupe', 'Group', 'Grupo')}</div>
         <div class="group-code-row">
           <span>${esc(state.group.name)}</span>
           <span class="code-pill">${esc(state.group.code)}</span>
         </div>
-        <button class="btn btn-main btn-block" id="inviteBtn" style="margin-top:14px">${T('Inviter des potes', 'Invite your mates')}</button>
+        <button class="btn btn-main btn-block" id="inviteBtn" style="margin-top:14px">${T('Inviter des potes', 'Invite your mates', 'Invitar a colegas')}</button>
       </div>
 
       <div class="card">
-        <div class="card-title">Notifications</div>
+        <div class="card-title">${T('Notifications', 'Notifications', 'Notificaciones')}</div>
         <p class="muted small" id="pushStatus" style="margin:0 0 12px">…</p>
-        ${iOS && !standalone ? `<div class="info" style="margin-bottom:12px">${T('Sur iPhone : touche <b>Partager</b> puis <b>Sur l’écran d’accueil</b>, et ouvre l’app depuis la nouvelle icône pour pouvoir activer les notifications.', 'On iPhone: tap <b>Share</b> then <b>Add to Home Screen</b>, and open the app from the new icon to be able to turn on notifications.')}</div>` : ''}
+        ${iOS && !standalone ? `<div class="info" style="margin-bottom:12px">${T('Sur iPhone : touche <b>Partager</b> puis <b>Sur l’écran d’accueil</b>, et ouvre l’app depuis la nouvelle icône pour pouvoir activer les notifications.', 'On iPhone: tap <b>Share</b> then <b>Add to Home Screen</b>, and open the app from the new icon to be able to turn on notifications.', 'En iPhone: toca <b>Compartir</b> y luego <b>Añadir a pantalla de inicio</b>, y abre la app desde el icono nuevo para poder activar las notificaciones.')}</div>` : ''}
         <div class="row" style="margin-top:0">
-          <button class="btn btn-main" id="pushBtn" ${pushOk ? '' : 'disabled'}>${T('Activer les notifications', 'Turn on notifications')}</button>
-          <button class="btn btn-soft" id="pushTest" hidden>${T('Tester', 'Test')}</button>
+          <button class="btn btn-main" id="pushBtn" ${pushOk ? '' : 'disabled'}>${T('Activer les notifications', 'Turn on notifications', 'Activar notificaciones')}</button>
+          <button class="btn btn-soft" id="pushTest" hidden>${T('Tester', 'Test', 'Probar')}</button>
         </div>
         <p class="push-out muted small" id="pushOut"></p>
         <div class="notif-prefs">
           ${[
-            ['polls', T('Nouvelles questions', 'New questions')],
-            ['votes', T('Quand quelqu’un vote', 'When someone votes')],
-            ['chat', T('Messages', 'Messages')],
-            ['mentions', T('Quand on te tague ou te répond', 'When someone tags you or replies to you'), T('Même si les messages sont coupés', 'Even if messages are off')],
-            ['streaks', T('Rappel de série 🔥', 'Streak reminder 🔥'), T('Le soir, si ta série va s’arrêter', 'In the evening, if your streak is about to end')],
-            ['news', T('Nouveautés de l’app', 'App updates'), T('Une fois par nouvelle version', 'Once per new version')],
+            ['polls', T('Nouvelles questions', 'New questions', 'Preguntas nuevas')],
+            ['votes', T('Quand quelqu’un vote', 'When someone votes', 'Cuando alguien vota')],
+            ['chat', T('Messages', 'Messages', 'Mensajes')],
+            ['mentions', T('Quand on te tague ou te répond', 'When someone tags you or replies to you', 'Cuando te etiquetan o te responden'), T('Même si les messages sont coupés', 'Even if messages are off', 'Aunque tengas los mensajes desactivados')],
+            ['streaks', T('Rappel de série 🔥', 'Streak reminder 🔥', 'Recordatorio de racha 🔥'), T('Le soir, si ta série va s’arrêter', 'In the evening, if your streak is about to end', 'Por la noche, si vas a perder la racha')],
+            ['news', T('Nouveautés de l’app', 'App updates', 'Novedades de la app'), T('Une fois par nouvelle version', 'Once per new version', 'Una vez por cada versión nueva')],
           ].map(([k, label, sub]) => `
             <label class="switch-row"><span>${label}${sub ? `<small class="muted">${sub}</small>` : ''}</span><input type="checkbox" class="switch" data-notif="${k}" ${state.me.notif[k] ? 'checked' : ''}></label>`).join('')}
         </div>
@@ -3018,20 +3282,19 @@
 
       ${state.me.isAdmin ? adminHtml() : ''}
 
-      <button class="btn btn-soft btn-block" id="logout">${T('Se déconnecter', 'Log out')}</button>
-      ${aboutLinks()}`;
+      <button class="btn btn-soft btn-block" id="logout">${T('Se déconnecter', 'Log out', 'Cerrar sesión')}</button>`;
 
     bindLangSwitch(view, () => renderMain());
     view.querySelectorAll('[data-color]').forEach((b) => action(b, async () => {
       if (b.classList.contains('on')) return;
       await api('PATCH', 'me', { color: b.dataset.color });
-      toast(T('Couleur changée', 'Color changed'));
+      toast(T('Couleur changée', 'Color changed', 'Color cambiado'));
       await refresh();
     }));
     action(document.getElementById('saveName'), async () => {
       await api('PATCH', 'me', { name: document.getElementById('myName').value });
       document.activeElement.blur();
-      toast(T('Pseudo changé', 'Name changed'));
+      toast(T('Pseudo changé', 'Name changed', 'Nombre cambiado'));
       await refresh();
     });
     const changePhoto = async () => {
@@ -3039,7 +3302,7 @@
       if (!data) return;
       try {
         await api('POST', 'me/photo', { data });
-        toast(T('Photo mise à jour', 'Photo updated'));
+        toast(T('Photo mise à jour', 'Photo updated', 'Foto actualizada'));
         await refresh();
       } catch (e) { toast(e.message); }
     };
@@ -3047,7 +3310,7 @@
     document.getElementById('photoBtn2').onclick = changePhoto;
     action(document.getElementById('photoDel'), async () => {
       await api('DELETE', 'me/photo');
-      toast(T('Photo retirée', 'Photo removed'));
+      toast(T('Photo retirée', 'Photo removed', 'Foto quitada'));
       await refresh();
     });
     setupPushButton(pushOk);
@@ -3077,7 +3340,7 @@
     const owner = (c) => state.players.find((p) => p.color === c && p.id !== m.id);
     return `<div class="color-grid">${state.colors.map((c) => {
       const o = owner(c);
-      return `<button type="button" class="swatch ${c === m.color ? 'on' : ''} ${o ? 'taken' : ''}" style="--pc:${c}" ${o ? 'disabled' : `data-color="${c}"`} aria-label="${o ? T('Prise par', 'Taken by') + ' ' + esc(o.name) : c}" title="${o ? esc(o.name) : ''}">${o ? avatar(o, 'xs') : c === m.color ? icon('check') : ''}</button>`;
+      return `<button type="button" class="swatch ${c === m.color ? 'on' : ''} ${o ? 'taken' : ''}" style="--pc:${c}" ${o ? 'disabled' : `data-color="${c}"`} aria-label="${o ? T('Prise par', 'Taken by', 'Pillado por') + ' ' + esc(o.name) : c}" title="${o ? esc(o.name) : ''}">${o ? avatar(o, 'xs') : c === m.color ? icon('check') : ''}</button>`;
     }).join('')}</div>`;
   }
 
@@ -3086,75 +3349,80 @@
     const s = { ...state.settings, startHour: Math.round(hourToLocal(state.settings.startHour, state.settings.timezone)) % 24, endHour: Math.round(hourToLocal(state.settings.endHour, state.settings.timezone)) % 24, timezone: myTz };
     // Fin : de « début + 1 h » à « début − 1 h » (le lendemain). Les deux heures sont incluses.
     const endOptions = (start, end) => Array.from({ length: 23 }, (_, i) => (start + 1 + i) % 24)
-      .map((h) => `<option value="${h}" ${h === end ? 'selected' : ''}>${hourLabel(h)}${h < start ? T(' (lendemain)', ' (next day)') : ''}</option>`).join('');
+      .map((h) => `<option value="${h}" ${h === end ? 'selected' : ''}>${hourLabel(h)}${h < start ? T(' (lendemain)', ' (next day)', ' (día siguiente)') : ''}</option>`).join('');
     return `
       <div class="section-title">Admin</div>
 
       <div class="card">
-        <div class="card-title">${T('Nom du groupe', 'Group name')}</div>
+        <div class="card-title">${T('Nom du groupe', 'Group name', 'Nombre del grupo')}</div>
         <div class="inline-form">
           <input class="input" id="groupName" maxlength="40" value="${esc(state.group.name)}">
           <button class="btn btn-soft" id="saveGroup">OK</button>
         </div>
-        <p class="muted small" style="margin:10px 0 0">${T('Le code a fuité ? Génère-en un nouveau : l’ancien ne marchera plus (ceux qui ont déjà rejoint restent connectés).', 'Code leaked? Make a new one: the old one stops working (people who already joined stay logged in).')}</p>
-        <button class="btn btn-soft btn-block" id="newCode" style="margin-top:10px">${T('Générer un nouveau code', 'Make a new code')}</button>
+        <p class="muted small" style="margin:10px 0 0">${T('Le code a fuité ? Génère-en un nouveau : l’ancien ne marchera plus (ceux qui ont déjà rejoint restent connectés).', 'Code leaked? Make a new one: the old one stops working (people who already joined stay logged in).', '¿Se ha filtrado el código? Genera uno nuevo: el antiguo dejará de funcionar (quien ya se haya unido sigue conectado).')}</p>
+        <button class="btn btn-soft btn-block" id="newCode" style="margin-top:10px">${T('Générer un nouveau code', 'Make a new code', 'Generar un código nuevo')}</button>
       </div>
 
       <div class="card">
-        <div class="card-title">${T('Les potes', 'Your mates')} <span class="muted small">· ${state.players.length}</span></div>
-        <p class="muted small">${T('Ajoute tout le monde ici, même ceux qui n’ont pas encore rejoint : on peut déjà voter pour eux.', 'Add everyone here, even people who haven’t joined yet: you can already vote for them.')}</p>
+        <div class="card-title">${T('Les potes', 'Your mates', 'Los colegas')} <span class="muted small">· ${state.players.length}</span></div>
+        <p class="muted small">${T('Ajoute tout le monde ici, même ceux qui n’ont pas encore rejoint : on peut déjà voter pour eux.', 'Add everyone here, even people who haven’t joined yet: you can already vote for them.', 'Añade aquí a todo el mundo, aunque aún no se hayan unido: ya se les puede votar.')}</p>
         <div class="roster">${state.players.map((p) => `
           <div class="roster-row">
             ${avatar(p, 'sm')}
             <span class="name">${esc(p.name)}</span>
-            <span class="status ${p.claimed ? 'on' : ''}">${p.claimed ? T('a rejoint', 'joined') : T('en attente', 'waiting')}</span>
-            <button class="icon-btn" data-rename="${p.id}" title="${T('Renommer', 'Rename')}" aria-label="${T('Renommer', 'Rename')}">${icon('edit')}</button>
-            ${p.claimed && p.id !== state.me.playerId ? `<button class="icon-btn" data-reset="${p.id}" title="${T('Détacher ce nom de son compte', 'Unlink this name from its account')}" aria-label="${T('Détacher', 'Unlink')}">${icon('trash')}</button>` : ''}
-            ${!p.claimed ? `<button class="icon-btn" data-remove="${p.id}" title="${T('Retirer', 'Remove')}" aria-label="${T('Retirer', 'Remove')}">${icon('trash')}</button>` : ''}
+            <span class="status ${p.claimed ? 'on' : ''}">${p.claimed ? T('a rejoint', 'joined', 'se ha unido') : T('en attente', 'waiting', 'pendiente')}</span>
+            <button class="icon-btn" data-rename="${p.id}" title="${T('Renommer', 'Rename', 'Renombrar')}" aria-label="${T('Renommer', 'Rename', 'Renombrar')}">${icon('edit')}</button>
+            ${p.claimed && p.id !== state.me.playerId ? `<button class="icon-btn" data-reset="${p.id}" title="${T('Détacher ce nom de son compte', 'Unlink this name from its account', 'Desvincular este nombre de su cuenta')}" aria-label="${T('Détacher', 'Unlink', 'Desvincular')}">${icon('trash')}</button>` : ''}
+            ${!p.claimed ? `<button class="icon-btn" data-remove="${p.id}" title="${T('Retirer', 'Remove', 'Quitar')}" aria-label="${T('Retirer', 'Remove', 'Quitar')}">${icon('trash')}</button>` : ''}
           </div>`).join('')}
         </div>
-        <textarea class="input" id="rosterAdd" placeholder="${T('Un nom par ligne&#10;Alex&#10;John&#10;Carlos', 'One name per line&#10;Alex&#10;John&#10;Carlos')}" style="margin-top:12px;min-height:80px"></textarea>
-        <button class="btn btn-main btn-block" id="rosterBtn" style="margin-top:10px">${T('Ajouter', 'Add')}</button>
+        <textarea class="input" id="rosterAdd" placeholder="${T('Un nom par ligne&#10;Alex&#10;John&#10;Carlos', 'One name per line&#10;Alex&#10;John&#10;Carlos', 'Un nombre por línea&#10;Alex&#10;John&#10;Carlos')}" style="margin-top:12px;min-height:80px"></textarea>
+        <button class="btn btn-main btn-block" id="rosterBtn" style="margin-top:10px">${T('Ajouter', 'Add', 'Añadir')}</button>
       </div>
 
       <div class="card">
-        <div class="card-title">${T('Planning des questions', 'Question schedule')}</div>
+        <div class="card-title">${T('Planning des questions', 'Question schedule', 'Horario de las preguntas')}</div>
         <div class="settings-grid">
-          <label>${T('Toutes les (heures, 4 min.)', 'Every (hours, min. 4)')}<input class="input" id="sInterval" type="number" inputmode="decimal" step="0.5" min="4" max="24" value="${s.intervalHours}"></label>
-          <label>${T('Durée du vote (heures)', 'Voting time (hours)')}<input class="input" id="sPoll" type="number" inputmode="decimal" step="1" min="0.02" max="168" value="${s.pollHours}"></label>
-          <label>${T('À partir de', 'From')}<select class="input" id="sStart">${Array.from({ length: 24 }, (_, h) => `<option value="${h}" ${h === s.startHour ? 'selected' : ''}>${hourLabel(h)}</option>`).join('')}</select></label>
-          <label>${T('Jusqu’à (inclus)', 'Until (included)')}<select class="input" id="sEnd">${endOptions(s.startHour, s.endHour)}</select></label>
+          <label>${T('Toutes les (heures, 4 min.)', 'Every (hours, min. 4)', 'Cada (horas, mín. 4)')}<input class="input" id="sInterval" type="number" inputmode="decimal" step="0.5" min="4" max="24" value="${s.intervalHours}"></label>
+          <label>${T('Durée du vote (heures)', 'Voting time (hours)', 'Duración del voto (horas)')}<input class="input" id="sPoll" type="number" inputmode="decimal" step="1" min="0.02" max="168" value="${s.pollHours}"></label>
+          <label>${T('À partir de', 'From', 'Desde')}<select class="input" id="sStart">${Array.from({ length: 24 }, (_, h) => `<option value="${h}" ${h === s.startHour ? 'selected' : ''}>${hourLabel(h)}</option>`).join('')}</select></label>
+          <label>${T('Jusqu’à (inclus)', 'Until (included)', 'Hasta (incluida)')}<select class="input" id="sEnd">${endOptions(s.startHour, s.endHour)}</select></label>
         </div>
         <p class="muted small" id="sWindow" style="margin:8px 0 0">${scheduleText(s)}</p>
-        <p class="muted small tz-note">${T(`Heures de ton fuseau (${esc(myTz)}). Chacun les voit dans son propre fuseau.`, `Hours in your time zone (${esc(myTz)}). Everyone sees them in their own time zone.`)}${state.settings.timezone !== myTz ? T(` Le groupe était réglé sur ${esc(state.settings.timezone)} : en enregistrant, il passe sur le tien (mêmes horaires).`, ` The group was set to ${esc(state.settings.timezone)}: saving switches it to yours (same times).`) : ''}</p>
-        <p class="muted small">${T('Prochaine question auto', 'Next auto question')} : <b>${state.nextDrop ? clock(state.nextDrop) : '—'}</b> · ${plural(state.remainingQuestions, 'question')} ${T('en réserve', 'left')}</p>
-        <p class="muted small" style="margin-top:0">${T('Une nouvelle durée de vote s’applique aussi aux questions en cours.', 'A new voting time also applies to the questions already running.')}</p>
+        <p class="muted small tz-note">${T(`Heures de ton fuseau (${esc(myTz)}). Chacun les voit dans son propre fuseau.`, `Hours in your time zone (${esc(myTz)}). Everyone sees them in their own time zone.`, `Horas en tu zona horaria (${esc(myTz)}). Cada uno las ve en la suya.`)}${state.settings.timezone !== myTz ? T(` Le groupe était réglé sur ${esc(state.settings.timezone)} : en enregistrant, il passe sur le tien (mêmes horaires).`, ` The group was set to ${esc(state.settings.timezone)}: saving switches it to yours (same times).`, ` El grupo estaba en ${esc(state.settings.timezone)}: al guardar, se cambia a la tuya (mismos horarios).`) : ''}</p>
+        <p class="muted small">${T('Prochaine question auto', 'Next auto question', 'Próxima pregunta auto')} : <b>${state.nextDrop ? clock(state.nextDrop) : '—'}</b> · ${plural(state.remainingQuestions, T('question', 'question', 'pregunta'))} ${T('en réserve', 'left', 'en reserva')}</p>
+        <p class="muted small" style="margin-top:0">${T('Une nouvelle durée de vote s’applique aussi aux questions en cours.', 'A new voting time also applies to the questions already running.', 'Si cambias la duración, también afecta a las preguntas en curso.')}</p>
         <div class="row">
-          <button class="btn btn-main" id="saveSettings">${T('Enregistrer', 'Save')}</button>
-          <button class="btn btn-soft" id="forceDrop">${T('Lancer maintenant', 'Launch now')}</button>
+          <button class="btn btn-main" id="saveSettings">${T('Enregistrer', 'Save', 'Guardar')}</button>
+          <button class="btn btn-soft" id="forceDrop">${T('Lancer maintenant', 'Launch now', 'Lanzar ahora')}</button>
         </div>
       </div>
 
       <div class="card">
-        <div class="card-title">${T('Options du groupe', 'Group options')}</div>
-        <label class="switch-row"><span>${T('Questions en plus par jour', 'Extra questions per day')}<small class="muted">${T('Combien chacun peut en lancer avec le bouton +, en plus du planning.', 'How many each person can launch with the + button, on top of the schedule.')}</small></span>
+        <div class="card-title">${T('Options du groupe', 'Group options', 'Opciones del grupo')}</div>
+        <label class="switch-row"><span>${T('Questions en plus par jour', 'Extra questions per day', 'Preguntas extra al día')}<small class="muted">${T('Combien chacun peut en lancer avec le bouton +, en plus du planning.', 'How many each person can launch with the + button, on top of the schedule.', 'Cuántas puede lanzar cada uno con el botón +, además del horario.')}</small></span>
           <span class="stepper"><button type="button" data-step="-1" aria-label="−">−</button><b id="dropsN">${s.dropsPerDay ?? 1}</b><button type="button" data-step="1" aria-label="+">+</button></span></label>
-        <label class="switch-row"><span>${T('Réponse « Personne »', '“Nobody” answer')}<small class="muted">${T('Sur les questions au conditionnel (« Qui ferait… »), on peut voter pour personne.', 'On “Who would…” questions, people can vote for nobody.')}</small></span><input type="checkbox" class="switch" id="allowNobody" ${s.allowNobody ? 'checked' : ''}></label>
-        <label class="switch-row"><span>${T('Questionnaire de profil', 'Profile questionnaire')}<small class="muted">${T('Un onglet Quiz en plus : chacun répond à quelques questions (âge, études ou boulot, couple…), et les questions qui vous collent tombent plus souvent. Réponses anonymes.', 'An extra Quiz tab: everyone answers a few questions (age, studies or work, relationship…), and the questions that fit you come up more often. Answers stay anonymous.')}</small></span><input type="checkbox" class="switch" id="profilesOn" ${s.profiles ? 'checked' : ''}></label>
+        <label class="switch-row"><span>${T('Réponse « Personne »', '“Nobody” answer', 'Respuesta «Nadie»')}<small class="muted">${T('Sur les questions au conditionnel (« Qui ferait… »), on peut voter pour personne.', 'On “Who would…” questions, people can vote for nobody.', 'En las preguntas en condicional («¿Quién haría…?»), se puede votar por nadie.')}</small></span><input type="checkbox" class="switch" id="allowNobody" ${s.allowNobody ? 'checked' : ''}></label>
       </div>
 
       <div class="card">
-        <div class="card-title">${T('Questions à noter', 'Questions to score')}</div>
-        <p class="muted small">${T('Les questions créées par le groupe n’ont pas encore de stats. Copie-les, donne-les à Claude, puis colle sa réponse ici.', 'Questions written by the group don’t have stats yet. Copy them, give them to Claude, then paste its answer here.')}</p>
-        <button class="btn btn-soft btn-block" id="exportQ">${T('Copier les questions à noter', 'Copy the questions to score')}</button>
-        <textarea class="input" id="scoresIn" placeholder='${T('Réponse de Claude', 'Claude’s answer')} : {"id": {"chaos": 2, "hot": 1}, …}' style="margin-top:12px;min-height:80px"></textarea>
-        <button class="btn btn-main btn-block" id="importQ" style="margin-top:10px">${T('Importer les scores', 'Import the scores')}</button>
+        <div class="card-title">🧩 ${T('Questionnaire', 'Questionnaire', 'Cuestionario')}</div>
+        <label class="switch-row"><span>${T('Questionnaire de profil', 'Profile questionnaire', 'Cuestionario de perfil')}<small class="muted">${T('Un onglet Quiz en plus : chacun répond à quelques questions (âge, études ou boulot, couple…), et les questions qui vous collent tombent plus souvent. Réponses anonymes.', 'An extra Quiz tab: everyone answers a few questions (age, studies or work, relationship…), and the questions that fit you come up more often. Answers stay anonymous.', 'Una pestaña Quiz extra: cada uno responde a unas cuantas preguntas (edad, estudios o curro, pareja…), y las preguntas que van con vosotros salen más a menudo. Respuestas anónimas.')}</small></span><input type="checkbox" class="switch" id="profilesOn" ${s.profiles ? 'checked' : ''}></label>
+        ${s.profiles ? quizAdminCard() : ''}
       </div>
 
       <div class="card">
-        <div class="card-title">${T('Notes des questions', 'Question ratings')}</div>
-        <p class="muted small">${T(`${plural(state.groupStats.ratings.count, 'note')} données par le groupe. Copie-les pour une IA : elle saura quel genre de questions vous aimez pour en écrire de nouvelles.`, `${plural(state.groupStats.ratings.count, 'rating')} from the group. Copy them for an AI: it’ll know what kind of questions you like and can write new ones.`)}</p>
-        <button class="btn btn-soft btn-block" id="exportRatings" ${state.groupStats.ratings.count ? '' : 'disabled'}>${T('Copier les notes (JSON)', 'Copy the ratings (JSON)')}</button>
+        <div class="card-title">${T('Questions à noter', 'Questions to score', 'Preguntas por puntuar')}</div>
+        <p class="muted small">${T('Les questions créées par le groupe n’ont pas encore de stats. Copie-les, donne-les à Claude, puis colle sa réponse ici.', 'Questions written by the group don’t have stats yet. Copy them, give them to Claude, then paste its answer here.', 'Las preguntas creadas por el grupo aún no tienen stats. Cópialas, pásaselas a Claude y luego pega aquí su respuesta.')}</p>
+        <button class="btn btn-soft btn-block" id="exportQ">${T('Copier les questions à noter', 'Copy the questions to score', 'Copiar las preguntas por puntuar')}</button>
+        <textarea class="input" id="scoresIn" placeholder='${T('Réponse de Claude', 'Claude’s answer', 'Respuesta de Claude')} : {"id": {"chaos": 2, "hot": 1}, …}' style="margin-top:12px;min-height:80px"></textarea>
+        <button class="btn btn-main btn-block" id="importQ" style="margin-top:10px">${T('Importer les scores', 'Import the scores', 'Importar las puntuaciones')}</button>
+      </div>
+
+      <div class="card">
+        <div class="card-title">${T('Notes des questions', 'Question ratings', 'Notas de las preguntas')}</div>
+        <p class="muted small">${T(`${plural(state.groupStats.ratings.count, 'note')} données par le groupe. Copie-les pour une IA : elle saura quel genre de questions vous aimez pour en écrire de nouvelles.`, `${plural(state.groupStats.ratings.count, 'rating')} from the group. Copy them for an AI: it’ll know what kind of questions you like and can write new ones.`, `${plural(state.groupStats.ratings.count, 'nota')} del grupo. Cópialas para una IA: sabrá qué tipo de preguntas os gustan y podrá escribir otras nuevas.`)}</p>
+        <button class="btn btn-soft btn-block" id="exportRatings" ${state.groupStats.ratings.count ? '' : 'disabled'}>${T('Copier les notes (JSON)', 'Copy the ratings (JSON)', 'Copiar las notas (JSON)')}</button>
       </div>`;
   }
 
@@ -3162,75 +3430,76 @@
     action(document.getElementById('saveGroup'), async () => {
       await api('PATCH', 'admin/group', { name: document.getElementById('groupName').value });
       document.activeElement.blur();
-      toast(T('Groupe renommé', 'Group renamed'));
+      toast(T('Groupe renommé', 'Group renamed', 'Grupo renombrado'));
       await refresh();
     });
     action(document.getElementById('newCode'), async () => {
-      if (!confirm(T('Générer un nouveau code ? L’ancien ne marchera plus.', 'Make a new code? The old one will stop working.'))) return;
+      if (!confirm(T('Générer un nouveau code ? L’ancien ne marchera plus.', 'Make a new code? The old one will stop working.', '¿Generar un código nuevo? El antiguo dejará de funcionar.'))) return;
       const { group } = await api('POST', 'admin/group/code');
       save('code', group.code);
-      toast(T('Nouveau code : ', 'New code: ') + group.code);
+      toast(T('Nouveau code : ', 'New code: ', 'Código nuevo: ') + group.code);
       await refresh();
     });
     action(document.getElementById('rosterBtn'), async () => {
       const r = await api('POST', 'admin/players', { names: document.getElementById('rosterAdd').value });
-      toast(r.added.length ? T(`${plural(r.added.length, 'pote')} ajouté${r.added.length > 1 ? 's' : ''}`, `${plural(r.added.length, 'mate')} added`) : T('Personne d’ajouté', 'Nobody added'));
+      toast(r.added.length ? T(`${plural(r.added.length, 'pote')} ajouté${r.added.length > 1 ? 's' : ''}`, `${plural(r.added.length, 'mate')} added`, `¡${plural(r.added.length, 'colega')} dentro!`) : T('Personne d’ajouté', 'Nobody added', 'No se ha añadido a nadie'));
       if (r.errors.length) alert(r.errors.join('\n'));
       await refresh();
     });
     view.querySelectorAll('[data-rename]').forEach((b) => action(b, async () => {
       const p = player(b.dataset.rename);
-      const name = prompt(T('Nouveau nom pour ', 'New name for ') + p.name, p.name);
+      const name = prompt(T('Nouveau nom pour ', 'New name for ', 'Nuevo nombre para ') + p.name, p.name);
       if (!name || name === p.name) return;
       await api('PATCH', `admin/players/${p.id}`, { name });
       await refresh();
     }));
     view.querySelectorAll('[data-reset]').forEach((b) => action(b, async () => {
       const p = player(b.dataset.reset);
-      if (!confirm(T(`Détacher « ${p.name} » de son compte ? Ce nom redevient libre dans le groupe (ses votes restent) : quelqu’un pourra le reprendre en rejoignant. Pour un PIN oublié, utilise plutôt la clé 🔑.`, `Unlink “${p.name}” from their account? The name becomes free in the group again (their votes stay) and someone can take it when joining. For a forgotten PIN, use the 🔑 key instead.`))) return;
+      if (!confirm(T(`Détacher « ${p.name} » de son compte ? Ce nom redevient libre dans le groupe (ses votes restent) : quelqu’un pourra le reprendre en rejoignant. Pour un PIN oublié, utilise plutôt la clé 🔑.`, `Unlink “${p.name}” from their account? The name becomes free in the group again (their votes stay) and someone can take it when joining. For a forgotten PIN, use the 🔑 key instead.`, `¿Desvincular «${p.name}» de su cuenta? El nombre vuelve a quedar libre en el grupo (sus votos se quedan): alguien podrá pillarlo al unirse. Si es por un PIN olvidado, mejor usa la llave 🔑.`))) return;
       await api('POST', `admin/players/${p.id}/reset`);
-      toast(T('Nom détaché', 'Name unlinked'));
+      toast(T('Nom détaché', 'Name unlinked', 'Nombre desvinculado'));
       await refresh();
     }));
     view.querySelectorAll('[data-recover]').forEach((b) => action(b, async () => {
       const p = player(b.dataset.recover);
-      if (!confirm(T(`Créer un code de récupération pour ${p.name} ? Avec ce code et son identifiant, iel pourra choisir un nouveau PIN (valable 48 h).`, `Make a recovery code for ${p.name}? With it and their username, they can pick a new PIN (valid for 48 h).`))) return;
+      if (!confirm(T(`Créer un code de récupération pour ${p.name} ? Avec ce code et son identifiant, iel pourra choisir un nouveau PIN (valable 48 h).`, `Make a recovery code for ${p.name}? With it and their username, they can pick a new PIN (valid for 48 h).`, `¿Crear un código de recuperación para ${p.name}? Con este código y su usuario, podrá elegir un PIN nuevo (vale 48 h).`))) return;
       const r = await api('POST', `admin/players/${p.id}/recovery`);
       openSheet(`
-        <div class="sheet-head"><h2>${T('Code de récupération', 'Recovery code')}</h2><button class="x" data-close>✕</button></div>
-        <p class="muted" style="margin:0 0 6px">${T(`Donne ce code à <b>${esc(p.name)}</b>. Sur l’écran de connexion : « PIN oublié ? », son identifiant${r.username ? ` (<b>${esc(r.username)}</b>)` : ''}, ce code, puis un nouveau PIN. Il marche une fois, pendant 48 h.`, `Give this code to <b>${esc(p.name)}</b>. On the login screen: “Forgot your PIN?”, their username${r.username ? ` (<b>${esc(r.username)}</b>)` : ''}, this code, then a new PIN. It works once, for 48 h.`)}</p>
+        <div class="sheet-head"><h2>${T('Code de récupération', 'Recovery code', 'Código de recuperación')}</h2><button class="x" data-close>✕</button></div>
+        <p class="muted" style="margin:0 0 6px">${T(`Donne ce code à <b>${esc(p.name)}</b>. Sur l’écran de connexion : « PIN oublié ? », son identifiant${r.username ? ` (<b>${esc(r.username)}</b>)` : ''}, ce code, puis un nouveau PIN. Il marche une fois, pendant 48 h.`, `Give this code to <b>${esc(p.name)}</b>. On the login screen: “Forgot your PIN?”, their username${r.username ? ` (<b>${esc(r.username)}</b>)` : ''}, this code, then a new PIN. It works once, for 48 h.`, `Dale este código a <b>${esc(p.name)}</b>. En la pantalla de inicio de sesión: «¿PIN olvidado?», su usuario${r.username ? ` (<b>${esc(r.username)}</b>)` : ''}, este código y luego un PIN nuevo. Funciona una sola vez, durante 48 h.`)}</p>
         <div class="big-code">${esc(r.code)}</div>
-        <button class="btn btn-soft btn-block" id="copyRec">${T('Copier le code', 'Copy code')}</button>`, (root) => {
-        root.querySelector('#copyRec').onclick = () => navigator.clipboard.writeText(r.code).then(() => toast(T('Code copié', 'Code copied'))).catch(() => prompt(T('Copie ça :', 'Copy this:'), r.code));
+        <button class="btn btn-soft btn-block" id="copyRec">${T('Copier le code', 'Copy code', 'Copiar el código')}</button>`, (root) => {
+        root.querySelector('#copyRec').onclick = () => navigator.clipboard.writeText(r.code).then(() => toast(T('Code copié', 'Code copied', 'Código copiado'))).catch(() => prompt(T('Copie ça :', 'Copy this:', 'Copia esto:'), r.code));
       });
     }));
     view.querySelectorAll('[data-remove]').forEach((b) => action(b, async () => {
       const p = player(b.dataset.remove);
-      if (!confirm(T(`Retirer ${p.name} du groupe ?`, `Remove ${p.name} from the group?`))) return;
+      if (!confirm(T(`Retirer ${p.name} du groupe ?`, `Remove ${p.name} from the group?`, `¿Quitar a ${p.name} del grupo?`))) return;
       await api('DELETE', `admin/players/${p.id}`);
       await refresh();
     }));
     action(document.getElementById('saveSettings'), async () => {
       const v = (id) => document.getElementById(id).value;
       await api('PATCH', 'admin/settings', { intervalHours: v('sInterval'), pollHours: v('sPoll'), startHour: v('sStart'), endHour: v('sEnd'), timezone: myTz });
-      toast(T('Planning enregistré ⏰', 'Schedule saved ⏰'));
+      toast(T('Planning enregistré ⏰', 'Schedule saved ⏰', 'Horario guardado ⏰'));
       document.activeElement.blur();
       await refresh();
     });
     document.getElementById('allowNobody').onchange = async (e) => {
       try {
         await api('PATCH', 'admin/settings', { allowNobody: e.target.checked });
-        toast(e.target.checked ? T('Réponse « Personne » activée', '“Nobody” answer on') : T('Réponse « Personne » désactivée', '“Nobody” answer off'));
+        toast(e.target.checked ? T('Réponse « Personne » activée', '“Nobody” answer on', 'Respuesta «Nadie» activada') : T('Réponse « Personne » désactivée', '“Nobody” answer off', 'Respuesta «Nadie» desactivada'));
         await refresh();
       } catch (err) {
         e.target.checked = !e.target.checked;
         toast(err.message);
       }
     };
+    bindQuizAdmin(view);
     document.getElementById('profilesOn').onchange = async (e) => {
       try {
         await api('PATCH', 'admin/settings', { profiles: e.target.checked });
-        toast(e.target.checked ? T('Questionnaire activé : un onglet Quiz apparaît pour tout le monde', 'Questionnaire on: a Quiz tab shows up for everyone') : T('Questionnaire désactivé', 'Questionnaire off'));
+        toast(e.target.checked ? T('Questionnaire activé : un onglet Quiz apparaît pour tout le monde', 'Questionnaire on: a Quiz tab shows up for everyone', 'Cuestionario activado: aparece una pestaña Quiz para todo el mundo') : T('Questionnaire désactivé', 'Questionnaire off', 'Cuestionario desactivado'));
         await refresh();
       } catch (err) {
         e.target.checked = !e.target.checked;
@@ -3243,35 +3512,35 @@
       await api('PATCH', 'admin/settings', { dropsPerDay: n });
       state.settings.dropsPerDay = n;
       document.getElementById('dropsN').textContent = n;
-      toast(T(`${n} question${n > 1 ? 's' : ''} en plus par jour`, `${n} extra question${n > 1 ? 's' : ''} a day`));
+      toast(T(`${n} question${n > 1 ? 's' : ''} en plus par jour`, `${n} extra question${n > 1 ? 's' : ''} a day`, `${n} pregunta${n > 1 ? 's' : ''} extra al día`));
       softRefresh();
     }));
     action(document.getElementById('forceDrop'), async () => {
       const { poll } = await api('POST', 'admin/drop-auto');
       replacePoll(poll);
-      toast(T('Question lancée', 'Question launched'));
+      toast(T('Question lancée', 'Question launched', 'Pregunta lanzada'));
       go('live');
       await refresh();
     });
     action(document.getElementById('exportQ'), async () => {
       const { questions } = await api('GET', 'admin/unscored');
-      if (!questions.length) return toast(T('Rien à noter, tout est à jour', 'Nothing to score, all up to date'));
-      const text = T('Questions « Qui de nous ? » à noter (stats : chaos, hot, coeur, cerveau, genance, toxique, exces ; 1 à 3 stats par question, valeurs -2 à 3). Réponds en JSON {"id": {"stat": valeur}}.', '“Which of us?” questions to score (stats: chaos, hot, coeur, cerveau, genance, toxique, exces; 1 to 3 stats per question, values -2 to 3). Answer in JSON {"id": {"stat": value}}.') + '\n\n' + JSON.stringify(questions, null, 1);
+      if (!questions.length) return toast(T('Rien à noter, tout est à jour', 'Nothing to score, all up to date', 'Nada que puntuar, todo al día'));
+      const text = T('Questions « Qui de nous ? » à noter (stats : chaos, hot, coeur, cerveau, genance, toxique, exces ; 1 à 3 stats par question, valeurs -2 à 3). Réponds en JSON {"id": {"stat": valeur}}.', '“Which of us?” questions to score (stats: chaos, hot, coeur, cerveau, genance, toxique, exces; 1 to 3 stats per question, values -2 to 3). Answer in JSON {"id": {"stat": value}}.', 'Preguntas de «¿Quién de nosotros?» para puntuar (stats: chaos, hot, coeur, cerveau, genance, toxique, exces; de 1 a 3 stats por pregunta, valores de -2 a 3). Responde en JSON {\"id\": {\"stat\": valor}}.') + '\n\n' + JSON.stringify(questions, null, 1);
       try {
         await navigator.clipboard.writeText(text);
-        toast(T(`${plural(questions.length, 'question')} copiée${questions.length > 1 ? 's' : ''}`, `${plural(questions.length, 'question')} copied`));
+        toast(T(`${plural(questions.length, 'question')} copiée${questions.length > 1 ? 's' : ''}`, `${plural(questions.length, 'question')} copied`, `${plural(questions.length, 'pregunta')} en el portapapeles`));
       } catch {
         document.getElementById('scoresIn').value = text;
-        toast(T('Copie impossible : le texte est dans la case, copie-le à la main', 'Couldn’t copy: the text is in the box, copy it by hand'));
+        toast(T('Copie impossible : le texte est dans la case, copie-le à la main', 'Couldn’t copy: the text is in the box, copy it by hand', 'No se ha podido copiar: el texto está en la casilla, cópialo a mano'));
       }
     });
     action(document.getElementById('importQ'), async () => {
       const raw = document.getElementById('scoresIn').value.trim();
       const json = raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1);
       let scores;
-      try { scores = JSON.parse(json); } catch { throw new Error(T('JSON invalide', 'Invalid JSON')); }
+      try { scores = JSON.parse(json); } catch { throw new Error(T('JSON invalide', 'Invalid JSON', 'JSON no válido')); }
       const r = await api('POST', 'admin/scores', { scores });
-      toast(T(`${plural(r.updated, 'question')} notée${r.updated > 1 ? 's' : ''}`, `${plural(r.updated, 'question')} scored`));
+      toast(T(`${plural(r.updated, 'question')} notée${r.updated > 1 ? 's' : ''}`, `${plural(r.updated, 'question')} scored`, `${plural(r.updated, 'pregunta')} con nota`));
       if (r.errors.length) alert(r.errors.join('\n'));
       document.getElementById('scoresIn').value = '';
       await refresh();
@@ -3284,7 +3553,7 @@
       let end = Number(sEnd.value);
       if (end === start) end = (start + 1) % 24;
       sEnd.innerHTML = Array.from({ length: 23 }, (_, i) => (start + 1 + i) % 24)
-        .map((h) => `<option value="${h}" ${h === end ? 'selected' : ''}>${hourLabel(h)}${h < start ? T(' (lendemain)', ' (next day)') : ''}</option>`).join('');
+        .map((h) => `<option value="${h}" ${h === end ? 'selected' : ''}>${hourLabel(h)}${h < start ? T(' (lendemain)', ' (next day)', ' (día siguiente)') : ''}</option>`).join('');
       document.getElementById('sWindow').textContent = scheduleText({ ...state.settings, timezone: myTz, intervalHours: Number(document.getElementById('sInterval').value) || state.settings.intervalHours, startHour: start, endHour: end });
     };
     sStart.onchange = sync;
@@ -3292,13 +3561,13 @@
     document.getElementById('sInterval').oninput = sync;
     action(document.getElementById('exportRatings'), async () => {
       const data = await api('GET', 'admin/ratings');
-      const text = T('Notes des questions « Qui de nous ? » (1 = nulle, 5 = excellente), à utiliser pour écrire de nouvelles questions dans le même esprit que les mieux notées.', 'Ratings of the “Which of us?” questions (1 = bad, 5 = great), to use for writing new questions in the same spirit as the best rated ones.') + '\n\n' + JSON.stringify(data, null, 1);
+      const text = T('Notes des questions « Qui de nous ? » (1 = nulle, 5 = excellente), à utiliser pour écrire de nouvelles questions dans le même esprit que les mieux notées.', 'Ratings of the “Which of us?” questions (1 = bad, 5 = great), to use for writing new questions in the same spirit as the best rated ones.', 'Notas de las preguntas de «¿Quién de nosotros?» (1 = malísima, 5 = buenísima), para escribir preguntas nuevas con el mismo rollo que las mejor valoradas.') + '\n\n' + JSON.stringify(data, null, 1);
       try {
         await navigator.clipboard.writeText(text);
-        toast(T('Notes copiées', 'Ratings copied'));
+        toast(T('Notes copiées', 'Ratings copied', 'Notas copiadas'));
       } catch {
         document.getElementById('scoresIn').value = text;
-        toast(T('Copie impossible : le texte est dans la case « Questions à noter »', 'Couldn’t copy: the text is in the “Questions to score” box'));
+        toast(T('Copie impossible : le texte est dans la case « Questions à noter »', 'Couldn’t copy: the text is in the “Questions to score” box', 'No se ha podido copiar: el texto está en la casilla «Preguntas por puntuar»'));
       }
     });
   }
@@ -3408,10 +3677,10 @@
   // ---------- Chat : liste des discussions ----------
 
   function lastLine(t) {
-    if (t.locked) return `<span class="locked-line">${icon('lock')}${T('Vote pour voir les messages', 'Vote to see the messages')}</span>`;
+    if (t.locked) return `<span class="locked-line">${icon('lock')}${T('Vote pour voir les messages', 'Vote to see the messages', 'Vota para ver los mensajes')}</span>`;
     const m = t.last[0];
-    if (!m) return `<i>${T('Aucun message : lance la discussion !', 'No messages yet: get it going!')}</i>`;
-    const who = m.playerId === state.me.playerId ? T('Toi', 'You') : esc(player(m.playerId).name);
+    if (!m) return `<i>${T('Aucun message : lance la discussion !', 'No messages yet: get it going!', 'Aún no hay mensajes: ¡rompe el hielo!')}</i>`;
+    const who = m.playerId === state.me.playerId ? T('Toi', 'You', 'Tú') : esc(player(m.playerId).name);
     return `${who} : ${msgSnippet(m)}`;
   }
 
@@ -3430,7 +3699,7 @@
     const mini = general.last.map((m) => {
       const mine = m.playerId === state.me.playerId;
       const u = player(m.playerId);
-      const text = m.deleted ? `<i>${T('message supprimé', 'message deleted')}</i>` : m.kind === 'text' ? mentionHtml(m) : msgSnippet(m);
+      const text = m.deleted ? `<i>${T('message supprimé', 'message deleted', 'mensaje borrado')}</i>` : m.kind === 'text' ? mentionHtml(m) : msgSnippet(m);
       return `
         <div class="mini-msg ${mine ? 'mine' : ''}">
           ${mine ? '' : avatar(u, 'xs')}
@@ -3441,16 +3710,16 @@
     view.innerHTML = `
       <button class="card group-chat" data-thread="general">
         <div class="gc-head">
-          <span class="gc-title">👥 ${T('Chat du groupe', 'Group chat')}</span>
+          <span class="gc-title">👥 ${T('Chat du groupe', 'Group chat', 'Chat del grupo')}</span>
           ${general.unread ? `<span class="thread-badge">${general.unread}</span>` : general.last.length ? `<span class="small muted">${ago(general.last[general.last.length - 1].at)}</span>` : ''}
         </div>
-        <div class="gc-msgs">${mini || `<p class="muted small" style="margin:8px 0">${T('Aucun message pour l’instant. Dis bonjour !', 'No messages yet. Say hi!')}</p>`}</div>
-        <div class="gc-input">${T('Écrire un message…', 'Write a message…')}</div>
+        <div class="gc-msgs">${mini || `<p class="muted small" style="margin:8px 0">${T('Aucun message pour l’instant. Dis bonjour !', 'No messages yet. Say hi!', 'Aún no hay mensajes. ¡Saluda!')}</p>`}</div>
+        <div class="gc-input">${T('Écrire un message…', 'Write a message…', 'Escribe un mensaje…')}</div>
       </button>
-      <div class="section-title">${T('Discussions des questions en cours', 'Chats on live questions')}</div>
+      <div class="section-title">${T('Discussions des questions en cours', 'Chats on live questions', 'Chats de las preguntas en curso')}</div>
       ${others.length
         ? `<div class="card threads">${others.map((t) => row(t, esc(qText(t)), esc(setOf(t.setId).emoji))).join('')}</div>`
-        : `<div class="card empty" style="padding:18px">${T('Les discussions des questions en cours apparaîtront ici.<br>Une fois la question terminée, sa discussion reste dans les Archives.', 'Chats on the live questions show up here.<br>Once a question is over, its chat stays in the Archive.')}</div>`}`;
+        : `<div class="card empty" style="padding:18px">${T('Les discussions des questions en cours apparaîtront ici.<br>Une fois la question terminée, sa discussion reste dans les Archives.', 'Chats on the live questions show up here.<br>Once a question is over, its chat stays in the Archive.', 'Aquí aparecerán los chats de las preguntas en curso.<br>Cuando termina una pregunta, su chat se queda en el Archivo.')}</div>`}`;
     view.querySelectorAll('[data-thread]').forEach((b) => (b.onclick = () => openChat(b.dataset.thread)));
   }
 
@@ -3470,8 +3739,8 @@
   const dayKey = (t) => new Date(t).toLocaleDateString('fr-FR', { timeZone: tz() });
   const hhmm = (t) => new Date(t).toLocaleTimeString(LOC, { hour: '2-digit', minute: '2-digit', timeZone: tz() });
   function dayLabel(t) {
-    if (dayKey(t) === dayKey(now())) return T('Aujourd’hui', 'Today');
-    if (dayKey(t) === dayKey(now() - 86400000)) return T('Hier', 'Yesterday');
+    if (dayKey(t) === dayKey(now())) return T('Aujourd’hui', 'Today', 'Hoy');
+    if (dayKey(t) === dayKey(now() - 86400000)) return T('Hier', 'Yesterday', 'Ayer');
     return new Date(t).toLocaleDateString(LOC, { weekday: 'long', day: 'numeric', month: 'long', timeZone: tz() });
   }
 
@@ -3494,13 +3763,13 @@
     selMsg = null;
     replyTo = null;
     pendingImages = [];
-    const gifLabel = state.chat.gifs === 'tenor' ? T('Rechercher sur Tenor', 'Search Tenor') : T('Rechercher un GIF…', 'Search for a GIF…');
+    const gifLabel = state.chat.gifs === 'tenor' ? T('Rechercher sur Tenor', 'Search Tenor', 'Buscar en Tenor') : T('Rechercher un GIF…', 'Search for a GIF…', 'Buscar un GIF…');
     $chat.innerHTML = `
       <div class="chat-head">
-        <button class="chat-back" id="chatBack" aria-label="${T('Retour', 'Back')}">${icon('back')}</button>
+        <button class="chat-back" id="chatBack" aria-label="${T('Retour', 'Back', 'Volver')}">${icon('back')}</button>
         <div class="chat-title" id="chatTitle"></div>
       </div>
-      <div class="chat-list" id="chatList"><div class="chat-empty">${T('Chargement…', 'Loading…')}</div></div>
+      <div class="chat-list" id="chatList"><div class="chat-empty">${T('Chargement…', 'Loading…', 'Cargando…')}</div></div>
       <div class="chat-typing" id="chatTyping"></div>
       <div class="gif-panel" id="gifPanel" hidden>
         <input class="input" id="gifSearch" placeholder="${gifLabel}" autocomplete="off" enterkeyhint="search">
@@ -3510,10 +3779,10 @@
       <div class="mention-box" id="mentionBox" hidden></div>
       <div class="reply-bar" id="replyBar" hidden></div>
       <form class="chat-input" id="chatForm">
-        <button type="button" class="att-btn" id="photoSend" aria-label="${T('Envoyer une photo', 'Send a photo')}">${icon('image')}</button>
+        <button type="button" class="att-btn" id="photoSend" aria-label="${T('Envoyer une photo', 'Send a photo', 'Enviar una foto')}">${icon('image')}</button>
         <button type="button" class="gif-btn" id="gifBtn">GIF</button>
-        <textarea id="chatText" rows="1" maxlength="1000" placeholder="${T('Message…', 'Message…')}" enterkeyhint="send"></textarea>
-        <button type="submit" class="send-btn" aria-label="${T('Envoyer', 'Send')}">${icon('send')}</button>
+        <textarea id="chatText" rows="1" maxlength="1000" placeholder="${T('Message…', 'Message…', 'Mensaje…')}" enterkeyhint="send"></textarea>
+        <button type="submit" class="send-btn" aria-label="${T('Envoyer', 'Send', 'Enviar')}">${icon('send')}</button>
       </form>`;
     $chat.hidden = false;
     document.body.classList.add('noscroll');
@@ -3726,7 +3995,7 @@
     const el = document.getElementById('chatTitle');
     if (!el) return;
     if (chatOpen === 'general') {
-      el.innerHTML = `<b>${T('Chat du groupe', 'Group chat')}</b><span>${esc(state.group.name)} · ${plural(state.players.filter((p) => p.claimed).length, T('membre', 'member'))}</span>`;
+      el.innerHTML = `<b>${T('Chat du groupe', 'Group chat', 'Chat del grupo')}</b><span>${esc(state.group.name)} · ${plural(state.players.filter((p) => p.claimed).length, T('membre', 'member', 'miembro'))}</span>`;
       return;
     }
     const c = chats.get(chatOpen);
@@ -3734,8 +4003,8 @@
     const t = state.chat.threads.find((x) => x.channel === chatOpen);
     const s = setOf((p || t || {}).setId);
     const ended = p && (p.ended || p.endsAt <= now());
-    const status = p ? (ended ? T('terminé', 'over') : T('encore ', '') + left(p.endsAt) + T('', ' left')) : '';
-    el.innerHTML = `<b class="clamp2">${esc(qText(p || t) || T('Discussion', 'Chat'))}</b><span>${esc(s.emoji)} ${esc(setName(s))}${status ? ' · ' + status : ''}</span>`;
+    const status = p ? (ended ? T('terminé', 'over', 'terminada') : T('encore ', '', 'quedan ') + left(p.endsAt) + T('', ' left', '')) : '';
+    el.innerHTML = `<b class="clamp2">${esc(qText(p || t) || T('Discussion', 'Chat', 'Chat'))}</b><span>${esc(s.emoji)} ${esc(setName(s))}${status ? ' · ' + status : ''}</span>`;
   }
 
   // Ce qu'on a en mémoire s'affiche tout de suite, puis on recharge toujours depuis le serveur : en arrière-plan
@@ -3795,8 +4064,8 @@
 
   function namesList(list, max = 3) {
     const names = list.map((p) => esc(p.name));
-    const and = T(' et ', ' and ');
-    return names.length <= max ? names.join(', ').replace(/, ([^,]*)$/, `${and}$1`) : `${names.slice(0, max).join(', ')}${and}${names.length - max} ${T('autres', 'others')}`;
+    const and = T(' et ', ' and ', ' y ');
+    return names.length <= max ? names.join(', ').replace(/, ([^,]*)$/, `${and}$1`) : `${names.slice(0, max).join(', ')}${and}${names.length - max} ${T('autres', 'others', 'más')}`;
   }
 
   // Texte d'un message avec les « @Prénom » tagués surlignés (dans la couleur de la personne).
@@ -3822,13 +4091,13 @@
     return `
       <div class="msg-detail ${mine ? 'mine' : ''}">
         <div class="md-reacts">${reacts.length
-          ? reacts.map((r) => `<span class="md-react"><span class="md-emoji">${r.emoji}</span><span class="md-names">${r.players.map((pid) => `<b class="pname" style="--pc:${esc(player(pid).color)}">${esc(pid === state.me.playerId ? T('Toi', 'You') : player(pid).name)}</b>`).join(', ')}</span></span>`).join('')
-          : `<span class="muted">${T('Double tape pour ❤️ · reste appuyé pour réagir · glisse à droite pour répondre', 'Double tap to ❤️ · hold to react · swipe right to reply')}</span>`}</div>
+          ? reacts.map((r) => `<span class="md-react"><span class="md-emoji">${r.emoji}</span><span class="md-names">${r.players.map((pid) => `<b class="pname" style="--pc:${esc(player(pid).color)}">${esc(pid === state.me.playerId ? T('Toi', 'You', 'Tú') : player(pid).name)}</b>`).join(', ')}</span></span>`).join('')
+          : `<span class="muted">${T('Double tape pour ❤️ · reste appuyé pour réagir · glisse à droite pour répondre', 'Double tap to ❤️ · hold to react · swipe right to reply', 'Doble toque para ❤️ · mantén pulsado para reaccionar · desliza a la derecha para responder')}</span>`}</div>
         <div class="md-foot">
           <span class="muted">${hhmm(m.at)}</span>
           <span class="md-actions">
-            <button class="md-reply" data-replymsg="${m.id}">${icon('reply')}${T('Répondre', 'Reply')}</button>
-            ${mine || state.me.isAdmin ? `<button class="md-del" data-delmsg="${m.id}">${icon('trash')}${T('Supprimer', 'Delete')}</button>` : ''}
+            <button class="md-reply" data-replymsg="${m.id}">${icon('reply')}${T('Répondre', 'Reply', 'Responder')}</button>
+            ${mine || state.me.isAdmin ? `<button class="md-del" data-delmsg="${m.id}">${icon('trash')}${T('Supprimer', 'Delete', 'Borrar')}</button>` : ''}
           </span>
         </div>
       </div>`;
@@ -3883,16 +4152,16 @@
     const mine = (m.reactions || {})[state.me.playerId];
     const preview = m.kind === 'text' ? esc(m.text.length > 90 ? m.text.slice(0, 89) + '…' : m.text) : msgSnippet(m);
     openSheet(`
-      <div class="sheet-head"><h2>${T('Réagir', 'React')}</h2><button class="x" data-close>✕</button></div>
+      <div class="sheet-head"><h2>${T('Réagir', 'React', 'Reaccionar')}</h2><button class="x" data-close>✕</button></div>
       <p class="react-preview"><b class="pname" style="--pc:${esc(player(m.playerId).color)}">${esc(player(m.playerId).name)}</b> ${preview}</p>
       <div class="react-quick">${REACTIONS.map((e) => `<button data-pick="${e}" class="${mine === e ? 'on' : ''}">${e}</button>`).join('')}</div>
       <div class="react-type">
-        <input class="input" id="emojiInput" placeholder="${T('Ou tape n’importe quel emoji…', 'Or type any emoji…')}" autocomplete="off" enterkeyhint="done">
+        <input class="input" id="emojiInput" placeholder="${T('Ou tape n’importe quel emoji…', 'Or type any emoji…', 'O escribe cualquier emoji…')}" autocomplete="off" enterkeyhint="done">
       </div>
       <div class="emoji-all">${EMOJI_GRID.map((e) => `<button data-pick="${e}" class="${mine === e ? 'on' : ''}">${e}</button>`).join('')}</div>
       <div class="react-actions">
-        <button class="link-btn" id="pickReply">${icon('reply')} ${T('Répondre', 'Reply')}</button>
-        ${mine ? `<button class="link-btn" data-pick="${esc(mine)}">${T('Retirer ma réaction', 'Remove my reaction')} ${mine}</button>` : ''}
+        <button class="link-btn" id="pickReply">${icon('reply')} ${T('Répondre', 'Reply', 'Responder')}</button>
+        ${mine ? `<button class="link-btn" data-pick="${esc(mine)}">${T('Retirer ma réaction', 'Remove my reaction', 'Quitar mi reacción')} ${mine}</button>` : ''}
       </div>`, (root) => {
       const pick = (e) => { closeSheet(); reactTo(m.id, e); };
       root.querySelectorAll('[data-pick]').forEach((b) => (b.onclick = () => pick(b.dataset.pick)));
@@ -4022,8 +4291,8 @@
     bar.hidden = false;
     bar.innerHTML = `
       <span class="rb-ico">${icon('reply')}</span>
-      <span class="rb-body" style="--pc:${esc(u.color)}"><b class="pname">${T('Répondre à', 'Replying to')} ${esc(u.id === state.me.playerId ? T('toi', 'yourself') : u.name)}</b><span>${msgSnippet(replyTo)}</span></span>
-      <button type="button" class="x" id="replyCancel" aria-label="${T('Annuler', 'Cancel')}">✕</button>`;
+      <span class="rb-body" style="--pc:${esc(u.color)}"><b class="pname">${T('Répondre à', 'Replying to', 'Respondiendo a')} ${esc(u.id === state.me.playerId ? T('toi', 'yourself', 'ti') : u.name)}</b><span>${msgSnippet(replyTo)}</span></span>
+      <button type="button" class="x" id="replyCancel" aria-label="${T('Annuler', 'Cancel', 'Cancelar')}">✕</button>`;
     document.getElementById('replyCancel').onclick = () => setReply(null);
     const text = document.getElementById('chatText');
     if (text && !text.disabled) text.focus();
@@ -4105,7 +4374,7 @@
       };
       img.onerror = () => {
         URL.revokeObjectURL(url);
-        reject(new Error(T('Image illisible', 'Can’t read that image')));
+        reject(new Error(T('Image illisible', 'Can’t read that image', 'No se puede leer la imagen')));
       };
       img.src = url;
     });
@@ -4146,7 +4415,7 @@
     v.id = 'viewer';
     v.className = 'viewer';
     v.innerHTML = `
-      <div class="viewer-top"><span>${avatar(u, 'xs')} ${esc(u.name)} · ${hhmm(m.at)}</span><button class="x" aria-label="${T('Fermer', 'Close')}">✕</button></div>
+      <div class="viewer-top"><span>${avatar(u, 'xs')} ${esc(u.name)} · ${hhmm(m.at)}</span><button class="x" aria-label="${T('Fermer', 'Close', 'Cerrar')}">✕</button></div>
       <img src="/api/images/${esc(m.image.id)}" alt="">`;
     v.onclick = () => (history.state && history.state.guard ? history.back() : closeViewer());
     document.body.appendChild(v);
@@ -4161,8 +4430,8 @@
   function replyQuote(r) {
     if (!r) return '';
     const u = player(r.playerId);
-    const what = r.deleted ? `<i>${T('message supprimé', 'message deleted')}</i>` : r.kind === 'gif' ? 'GIF' : r.kind === 'image' ? `📷 ${T('Photo', 'Photo')}` : esc(r.text);
-    return `<span class="reply-quote" data-jump="${r.id}" style="--pc:${esc(u.color)}"><b class="pname">${esc(u.id === state.me.playerId ? T('Toi', 'You') : u.name)}</b><span>${what}</span></span>`;
+    const what = r.deleted ? `<i>${T('message supprimé', 'message deleted', 'mensaje borrado')}</i>` : r.kind === 'gif' ? 'GIF' : r.kind === 'image' ? `📷 ${T('Photo', 'Photo', 'Foto')}` : esc(r.text);
+    return `<span class="reply-quote" data-jump="${r.id}" style="--pc:${esc(u.color)}"><b class="pname">${esc(u.id === state.me.playerId ? T('Toi', 'You', 'Tú') : u.name)}</b><span>${what}</span></span>`;
   }
 
   function renderChatMessages(forceBottom) {
@@ -4176,9 +4445,9 @@
       list.innerHTML = `
         <div class="chat-locked">
           <span class="cl-ico">${icon('lock')}</span>
-          <b>${T('Vote d’abord', 'Vote first')}</b>
-          <p class="muted">${c.count ? T(`${plural(c.count, 'message')} t’attend${c.count > 1 ? 'ent' : ''} ici. `, `${plural(c.count, 'message')} waiting here. `) : ''}${T('Pour que personne ne soit influencé, la discussion s’ouvre une fois que tu as voté.', 'So nobody gets influenced, the chat opens once you’ve voted.')}</p>
-          <button class="btn btn-main" id="goVote">${T('Aller voter', 'Go vote')}</button>
+          <b>${T('Vote d’abord', 'Vote first', 'Vota primero')}</b>
+          <p class="muted">${c.count ? T(`${plural(c.count, 'message')} t’attend${c.count > 1 ? 'ent' : ''} ici. `, `${plural(c.count, 'message')} waiting here. `, `Hay ${plural(c.count, 'mensaje')} esperándote aquí. `) : ''}${T('Pour que personne ne soit influencé, la discussion s’ouvre une fois que tu as voté.', 'So nobody gets influenced, the chat opens once you’ve voted.', 'Para no condicionar a nadie, el chat se abre cuando votes.')}</p>
+          <button class="btn btn-main" id="goVote">${T('Aller voter', 'Go vote', 'Ir a votar')}</button>
         </div>`;
       document.getElementById('goVote').onclick = () => {
         const id = chatOpen;
@@ -4190,9 +4459,9 @@
     }
     if (selMsg && !c.messages.some((m) => m.id === selMsg && !m.deleted)) selMsg = null;
 
-    let html = c.hasMore ? `<button class="chat-older" id="chatOlder">${T('Messages précédents', 'Older messages')}</button>` : '';
+    let html = c.hasMore ? `<button class="chat-older" id="chatOlder">${T('Messages précédents', 'Older messages', 'Mensajes anteriores')}</button>` : '';
     if (!c.messages.length && !pendingImages.length) {
-      html += `<div class="chat-empty">${chatOpen === 'general' ? T('Aucun message pour l’instant. Dis bonjour !', 'No messages yet. Say hi!') : T('Personne n’a encore commenté. Lance le débat !', 'Nobody commented yet. Start the debate!')}</div>`;
+      html += `<div class="chat-empty">${chatOpen === 'general' ? T('Aucun message pour l’instant. Dis bonjour !', 'No messages yet. Say hi!', 'Aún no hay mensajes. ¡Saluda!') : T('Personne n’a encore commenté. Lance le débat !', 'Nobody commented yet. Start the debate!', 'Nadie ha comentado todavía. ¡Abre el debate!')}</div>`;
     }
     c.messages.forEach((m, i) => {
       const prev = c.messages[i - 1];
@@ -4205,11 +4474,11 @@
       const last = !next || next.playerId !== m.playerId || next.at - m.at > 5 * 60000 || dayKey(next.at) !== dayKey(m.at) || !!next.reply;
       const media = !m.deleted && (m.kind === 'gif' || m.kind === 'image');
       const content = m.deleted
-        ? `<i>${T('Message supprimé', 'Message deleted')}</i>`
+        ? `<i>${T('Message supprimé', 'Message deleted', 'Mensaje borrado')}</i>`
         : m.kind === 'gif'
           ? `<img src="${esc(m.gif.url)}" width="${m.gif.w}" height="${m.gif.h}" alt="GIF" loading="lazy">`
           : m.kind === 'image'
-            ? `<img src="/api/images/${esc(m.image.id)}" width="${m.image.w}" height="${m.image.h}" alt="${T('Photo', 'Photo')}" loading="lazy" decoding="async">`
+            ? `<img src="/api/images/${esc(m.image.id)}" width="${m.image.w}" height="${m.image.h}" alt="${T('Photo', 'Photo', 'Foto')}" loading="lazy" decoding="async">`
             : mentionHtml(m);
       const reacts = reactionGroups(m);
       const sel = selMsg === m.id;
@@ -4244,7 +4513,7 @@
     list.querySelectorAll('[data-jump]').forEach((q) => (q.onclick = (e) => {
       e.stopPropagation();
       const el = document.getElementById('msg-' + q.dataset.jump);
-      if (!el) return toast(T('Message trop ancien : remonte la discussion', 'Message is too old: scroll up the chat'));
+      if (!el) return toast(T('Message trop ancien : remonte la discussion', 'Message is too old: scroll up the chat', 'Mensaje muy antiguo: sube más arriba en el chat'));
       el.scrollIntoView({ block: 'center', behavior: 'smooth' });
       el.classList.add('flash-msg');
       setTimeout(() => el.classList.remove('flash-msg'), 1400);
@@ -4257,7 +4526,7 @@
     }));
     list.querySelectorAll('[data-delmsg]').forEach((b) => {
       b.onclick = async () => {
-        if (!confirm(T('Supprimer ce message pour tout le monde ?', 'Delete this message for everyone?'))) return;
+        if (!confirm(T('Supprimer ce message pour tout le monde ?', 'Delete this message for everyone?', '¿Borrar este mensaje para todos?'))) return;
         try {
           await api('DELETE', `chat/${chatOpen}/messages/${b.dataset.delmsg}`);
           selMsg = null;
@@ -4286,9 +4555,9 @@
     const { seen, unseen } = seenBy(c, lastMsg);
     const mineLast = lastMsg.playerId === state.me.playerId;
     let label = '';
-    if (seen.length && !unseen.length) label = T('Vu par tout le monde', 'Seen by everyone');
-    else if (seen.length) label = `${T('Vu par', 'Seen by')} ${namesList(seen)}`;
-    else if (mineLast) label = T('Envoyé', 'Sent');
+    if (seen.length && !unseen.length) label = T('Vu par tout le monde', 'Seen by everyone', 'Visto por todos');
+    else if (seen.length) label = `${T('Vu par', 'Seen by', 'Visto por')} ${namesList(seen)}`;
+    else if (mineLast) label = T('Envoyé', 'Sent', 'Enviado');
     return label ? `<div class="seen-line ${mineLast ? 'mine' : ''}">${icon('check')}<span>${label}</span></div>` : '';
   }
   function updateSeenLine() {
@@ -4311,7 +4580,7 @@
     form.classList.toggle('locked', locked);
     form.querySelectorAll('textarea, button').forEach((el) => (el.disabled = locked));
     const t = document.getElementById('chatText');
-    if (t) t.placeholder = locked ? T('Vote d’abord pour écrire…', 'Vote first to write…') : T('Message…', 'Message…');
+    if (t) t.placeholder = locked ? T('Vote d’abord pour écrire…', 'Vote first to write…', 'Vota primero para escribir…') : T('Message…', 'Message…', 'Mensaje…');
   }
 
   function renderTyping() {
@@ -4321,8 +4590,8 @@
     const who = t ? [...t].filter(([, exp]) => exp > Date.now()).map(([pid]) => player(pid).name) : [];
     el.innerHTML = who.length
       ? `<span class="dots"><i></i><i></i><i></i></span>${esc(who.length === 1
-        ? T(`${who[0]} écrit…`, `${who[0]} is typing…`)
-        : who.length === 2 ? T(`${who[0]} et ${who[1]} écrivent…`, `${who[0]} and ${who[1]} are typing…`) : T('Plusieurs personnes écrivent…', 'Several people are typing…'))}`
+        ? T(`${who[0]} écrit…`, `${who[0]} is typing…`, `${who[0]} está escribiendo…`)
+        : who.length === 2 ? T(`${who[0]} et ${who[1]} écrivent…`, `${who[0]} and ${who[1]} are typing…`, `${who[0]} y ${who[1]} están escribiendo…`) : T('Plusieurs personnes écrivent…', 'Several people are typing…', 'Varias personas están escribiendo…'))}`
       : '';
   }
 
@@ -4360,7 +4629,7 @@
     if (!open) return;
     hideMentionBox();
     if (!state.chat.gifs) {
-      document.getElementById('gifGrid').innerHTML = `<p class="muted small gif-msg">${T('Les GIFs ne sont pas encore activés sur le serveur (il manque une clé GIPHY).', 'GIFs aren’t turned on on the server yet (missing GIPHY key).')}</p>`;
+      document.getElementById('gifGrid').innerHTML = `<p class="muted small gif-msg">${T('Les GIFs ne sont pas encore activés sur le serveur (il manque une clé GIPHY).', 'GIFs aren’t turned on on the server yet (missing GIPHY key).', 'Los GIFs aún no están activados en el servidor (falta una clave de GIPHY).')}</p>`;
       return;
     }
     document.getElementById('chatText').blur();
@@ -4370,13 +4639,13 @@
   async function searchGifs(q) {
     const grid = document.getElementById('gifGrid');
     if (!grid) return;
-    grid.innerHTML = `<p class="muted small gif-msg">${T('Chargement…', 'Loading…')}</p>`;
+    grid.innerHTML = `<p class="muted small gif-msg">${T('Chargement…', 'Loading…', 'Cargando…')}</p>`;
     try {
       const { results } = await api('GET', 'gifs?q=' + encodeURIComponent(q.trim()));
       if (!document.getElementById('gifGrid')) return;
       grid.innerHTML = results.length
         ? results.map((r, i) => `<button type="button" class="gif-item" data-gif="${i}"><img src="${esc(r.preview)}" alt="GIF" loading="lazy"></button>`).join('')
-        : `<p class="muted small gif-msg">${T('Aucun GIF trouvé 🤷', 'No GIFs found 🤷')}</p>`;
+        : `<p class="muted small gif-msg">${T('Aucun GIF trouvé 🤷', 'No GIFs found 🤷', 'No sale ningún GIF 🤷')}</p>`;
       grid.querySelectorAll('[data-gif]').forEach((b) => {
         action(b, async () => {
           const r = results[Number(b.dataset.gif)];
@@ -4401,12 +4670,14 @@
       if (u.searchParams.get('recap')) pendingRecap = u.searchParams.get('recap');
       if (u.searchParams.has('news')) pendingNews = true;
       if (u.searchParams.has('feedback')) pendingFeedback = true;
+      if (u.searchParams.has('quiz')) pendingQuiz = true;
       if ((pendingNews || pendingFeedback) && (!gid || gid === groupId)) return openPendingAbout();
       if (gid && gid !== groupId) {
         pendingChat = ch;
         enterGroup(gid);
       } else if (ch && state) openChat(ch);
       else if (pendingRecap && state) openRecapFromLink();
+      else if (pendingQuiz && state) quizPrompt();
     });
   }
 
@@ -4434,7 +4705,7 @@
   // (Ré)abonne cet appareil et le déclare au serveur.
   async function subscribePush() {
     const reg = swReg || (await swReady);
-    if (!reg || !vapid()) throw new Error(T('Ce navigateur ne gère pas les notifications', 'This browser doesn’t support notifications'));
+    if (!reg || !vapid()) throw new Error(T('Ce navigateur ne gère pas les notifications', 'This browser doesn’t support notifications', 'Este navegador no admite notificaciones'));
     let sub = await reg.pushManager.getSubscription();
     if (sub && !sameKey(sub)) {
       await sub.unsubscribe().catch(() => {});
@@ -4469,8 +4740,8 @@
     if (!pushOk || !swReg) {
       const iOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
       status.textContent = iOS
-        ? T('Sur iPhone, installe d’abord l’app sur l’écran d’accueil (Partager → Sur l’écran d’accueil) et ouvre-la depuis l’icône.', 'On iPhone, first install the app on your home screen (Share → Add to Home Screen) and open it from the icon.')
-        : T('Les notifications ne sont pas disponibles sur ce navigateur.', 'Notifications aren’t available in this browser.');
+        ? T('Sur iPhone, installe d’abord l’app sur l’écran d’accueil (Partager → Sur l’écran d’accueil) et ouvre-la depuis l’icône.', 'On iPhone, first install the app on your home screen (Share → Add to Home Screen) and open it from the icon.', 'En iPhone, primero instala la app en la pantalla de inicio (Compartir → Añadir a pantalla de inicio) y ábrela desde el icono.')
+        : T('Les notifications ne sont pas disponibles sur ce navigateur.', 'Notifications aren’t available in this browser.', 'Las notificaciones no están disponibles en este navegador.');
       btn.disabled = true;
       return;
     }
@@ -4478,11 +4749,11 @@
     const perm = Notification.permission;
     const on = !!sub && perm === 'granted' && !load('pushOff');
     status.textContent = on
-      ? T('Activées sur cet appareil.', 'On for this device.')
+      ? T('Activées sur cet appareil.', 'On for this device.', 'Activadas en este dispositivo.')
       : perm === 'denied'
-        ? T('Bloquées. Autorise les notifications pour cette app dans les réglages du téléphone, puis reviens ici.', 'Blocked. Allow notifications for this app in your phone settings, then come back here.')
-        : T('Désactivées sur cet appareil.', 'Off on this device.');
-    btn.textContent = on ? T('Désactiver', 'Turn off') : T('Activer les notifications', 'Turn on notifications');
+        ? T('Bloquées. Autorise les notifications pour cette app dans les réglages du téléphone, puis reviens ici.', 'Blocked. Allow notifications for this app in your phone settings, then come back here.', 'Bloqueadas. Permite las notificaciones de esta app en los ajustes del móvil y luego vuelve aquí.')
+        : T('Désactivées sur cet appareil.', 'Off on this device.', 'Desactivadas en este dispositivo.');
+    btn.textContent = on ? T('Désactiver', 'Turn off', 'Desactivar') : T('Activer les notifications', 'Turn on notifications', 'Activar notificaciones');
     btn.className = on ? 'btn btn-soft' : 'btn btn-main';
     btn.disabled = perm === 'denied';
     testBtn.hidden = !on;
@@ -4497,14 +4768,14 @@
             await current.unsubscribe();
           }
           save('pushOff', '1');
-          toast(T('Notifications désactivées', 'Notifications off'));
+          toast(T('Notifications désactivées', 'Notifications off', 'Notificaciones desactivadas'));
         } else {
           // iPhone : la demande d'autorisation doit partir directement du clic, sans attente avant.
           const p = Notification.permission === 'granted' ? 'granted' : await Notification.requestPermission();
-          if (p !== 'granted') throw new Error(T('Autorisation refusée', 'Permission denied'));
+          if (p !== 'granted') throw new Error(T('Autorisation refusée', 'Permission denied', 'Permiso denegado'));
           save('pushOff', null);
           await subscribePush();
-          toast(T('Notifications activées', 'Notifications on'));
+          toast(T('Notifications activées', 'Notifications on', 'Notificaciones activadas'));
         }
       } catch (e) {
         toast(e.message);
@@ -4514,13 +4785,13 @@
 
     testBtn.onclick = async () => {
       testBtn.disabled = true;
-      out.textContent = T('Envoi…', 'Sending…');
+      out.textContent = T('Envoi…', 'Sending…', 'Enviando…');
       try {
         await subscribePush();
         const r = await api('POST', 'push/test');
         out.textContent = !r.devices
-          ? T('Aucun appareil enregistré.', 'No device registered.')
-          : r.results.map((x) => (x.ok ? T(`Envoyé (${x.service}) : la notification doit arriver dans quelques secondes.`, `Sent (${x.service}): the notification should arrive in a few seconds.`) : `${T('Échec', 'Failed')} (${x.service}) : ${x.status || ''} ${x.error || ''}`)).join('\n');
+          ? T('Aucun appareil enregistré.', 'No device registered.', 'No hay ningún dispositivo registrado.')
+          : r.results.map((x) => (x.ok ? T(`Envoyé (${x.service}) : la notification doit arriver dans quelques secondes.`, `Sent (${x.service}): the notification should arrive in a few seconds.`, `Enviado (${x.service}): la notificación debería llegar en unos segundos.`) : `${T('Échec', 'Failed', 'Error')} (${x.service}) : ${x.status || ''} ${x.error || ''}`)).join('\n');
       } catch (e) {
         out.textContent = e.message;
       }
@@ -4559,7 +4830,7 @@
   // ---------- Démarrage ----------
 
   if (inviteCode) save('code', inviteCode.toUpperCase());
-  if (inviteCode || pendingChat || pendingRecap || pendingNews || pendingFeedback || (pendingGroup && !restoring)) history.replaceState(null, '', BASE);
+  if (inviteCode || pendingChat || pendingRecap || pendingNews || pendingFeedback || pendingQuiz || (pendingGroup && !restoring)) history.replaceState(null, '', BASE);
   if (token) startAccount();
   else if (inviteCode) ensureAccount().then(startAccount).catch((e) => renderWelcome(e.message)); // lien d'invitation : direct au choix du nom
   else renderWelcome();
