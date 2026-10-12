@@ -2624,3 +2624,7 @@ html:has(body.noscroll) { overflow: hidden; }
 .qa-row { display: flex; justify-content: space-between; font-size: 0.88rem; font-weight: 600; }
 .qa-bar { height: 8px; border-radius: 4px; background: var(--soft); overflow: hidden; margin-top: 6px; }
 .qa-bar span { display: block; height: 100%; background: var(--grad); border-radius: 4px; transition: width 0.4s; }
+
+/* Glisser pour changer d'onglet : la zone ne laisse au navigateur que le défilement vertical
+   (sinon il « prend » le geste dès qu'il est un peu en diagonale). */
+#view { touch-action: pan-y pinch-zoom; }

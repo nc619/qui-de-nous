@@ -490,6 +490,7 @@
 
   // Connexion sur un autre téléphone : identifiant + PIN. 'legacy' : compte d'avant (code du groupe + pseudo + PIN).
   function renderAuth(mode = 'login', err = '') {
+    removeFab();
     stopPolling();
     stopLobbyPolling();
     closeSheet();
@@ -659,7 +660,10 @@
     lobbyTimer = null;
   }
 
+  const removeFab = () => document.querySelectorAll('body > .fab').forEach((x) => x.remove());
+
   function renderLobby() {
+    removeFab();
     stopLive();
     stopPolling();
     stopLobbyPolling();
@@ -1321,6 +1325,7 @@
     // Pendant l'animation d'un vote, on ne redessine pas l'écran (on le fera juste après).
     if (animating) { pendingRender = true; return; }
     syncGuard();
+    removeFab(); // le bouton + (hors de #view) ne reste que sur Live → En cours, qui le recrée
     if (tab === 'quiz' && !state.settings.profiles) tab = 'live';
     ({ live: renderLive, chat: renderChatList, sets: renderSets, stats: renderStats, quiz: renderQuiz, me: renderMe }[tab] || renderLive)(view);
   }
@@ -1825,7 +1830,11 @@
     bindInstallBanner();
     view.querySelectorAll('[data-claimopen]').forEach((b) => (b.onclick = () => openClaimSheet(b.dataset.claimopen)));
     view.querySelectorAll('[data-recap]').forEach((b) => (b.onclick = () => openRecap(b.dataset.recap)));
-    document.getElementById('fab').onclick = () => openDropSheet();
+    // Le bouton + vit hors de #view : pendant un glissement, #view bouge (transform) et l'emporterait avec lui.
+    const fab = document.getElementById('fab');
+    document.querySelectorAll('body > .fab').forEach((x) => x !== fab && x.remove());
+    document.body.appendChild(fab);
+    fab.onclick = () => openDropSheet();
     const dt = document.getElementById('doneToggle');
     if (dt) dt.onclick = () => { doneFolded = !doneFolded; save('doneFolded', doneFolded ? '1' : null); renderView(); };
     const meter = document.getElementById('dropMeter');
@@ -3076,19 +3085,22 @@
     }, { passive: true });
     document.addEventListener('touchmove', (e) => {
       if (!s) return;
+      if (e.touches.length !== 1) { s = null; return; } // pincer pour zoomer : pas un glissement
       const t = e.touches[0];
       const dx = t.clientX - s.x;
       const dy = t.clientY - s.y;
       if (!s.dir) {
-        if (Math.abs(dy) > 12 && Math.abs(dy) > Math.abs(dx)) { s = null; return; }
-        if (Math.abs(dx) > 14 && Math.abs(dx) > Math.abs(dy) * 1.5) {
-          if (!e.cancelable) { s = null; return; }
+        // On décide sur l'ensemble du geste, pas sur les premiers pixels : un pouce part rarement bien à
+        // l'horizontale. Même si le navigateur a déjà commencé à faire défiler la page (geste un peu vertical
+        // au début), on continue à suivre le doigt au lieu d'abandonner.
+        if (Math.abs(dy) > 45 && Math.abs(dy) > Math.abs(dx) * 0.9) { s = null; return; }
+        if (Math.abs(dx) > 18 && Math.abs(dx) > Math.abs(dy) * 1.2) {
           s.dir = 'x';
           s.i = pageIndex();
           s.view.style.transition = 'none';
         } else return;
       }
-      e.preventDefault();
+      if (e.cancelable) e.preventDefault(); // bloque le défilement vertical pendant le glissement
       s.dx = dx;
       const can = s.i >= 0 && (dx < 0 ? s.i < pages().length - 1 : s.i > 0);
       const move = can ? dx : dx * 0.25;
