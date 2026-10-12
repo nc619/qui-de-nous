@@ -3,8 +3,8 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { store, load, persist, flush, newGroup, newCode } = require('./lib/store');
-const { latestSlot, nextSlot, isValidTimezone, zonedParts } = require('./lib/schedule');
+const { store, load, persist, flush, newGroup, newCode, MIN_INTERVAL } = require('./lib/store');
+const { latestSlot, nextSlot, isValidTimezone, zonedParts, zonedToUtc, dayShift } = require('./lib/schedule');
 const { STATS, parseWeights, computeStats, computeAffinity, computeGroup, ballot, tally } = require('./lib/stats');
 const push = require('./lib/push');
 const game = require('./lib/game');
@@ -14,6 +14,13 @@ const live = require('./lib/live');
 const gifs = require('./lib/gifs');
 const images = require('./lib/images');
 const i18n = require('./lib/i18n');
+const profile = require('./lib/profile');
+const streaks = require('./lib/streaks');
+const recap = require('./lib/recap');
+const changelog = require('./lib/changelog');
+
+// Le compte du développeur (variable OWNER_USERNAME sur Render) : reçoit les avis / bugs signalés.
+const isOwner = (account) => !!process.env.OWNER_USERNAME && !!account.username && account.username.toLowerCase() === process.env.OWNER_USERNAME.toLowerCase();
 const { HttpError, newId, cleanText, COLORS, OLD_COLORS } = game;
 
 const PORT = process.env.PORT || 3000;
@@ -26,14 +33,15 @@ const WORDS = new Set([
   'sets', 'questions', 'push', 'subscribe', 'unsubscribe', 'admin', 'players', 'reset', 'settings', 'drop-auto',
   'unscored', 'scores', 'group', 'code', 'chat', 'read', 'typing', 'events', 'gifs', 'messages', 'presence', 'test', 'react', 'photos', 'photo',
   'images', 'image', 'rate', 'ratings', 'account', 'accounts', 'recover', 'recovery', 'link',
+  'claim', 'claims', 'approve', 'deny', 'cancel', 'quiz', 'recap', 'changelog', 'feedback',
 ]);
 
 // Petit raccourci pour les textes envoyés aux gens (notifications) : français ou anglais selon leur réglage.
 const tr = (lang, fr, en) => (lang === 'en' ? en : fr);
 
-// Questions en plus lancées à la main (bouton +) : 3 par personne et par jour, remise à zéro à minuit
-// dans le fuseau du groupe (Paris par défaut).
-const DAILY_DROPS = 3;
+// Questions en plus lancées à la main (bouton +) : réglage du groupe (1 par personne et par jour par défaut),
+// remise à zéro à minuit dans le fuseau du groupe.
+const dropsPerDay = (g) => g.settings.dropsPerDay ?? 1;
 const dayKey = (t, tz) => {
   const p = zonedParts(t, tz);
   return `${p.year}-${p.month}-${p.day}`;
@@ -41,7 +49,12 @@ const dayKey = (t, tz) => {
 function dropsLeft(g, userId, now) {
   const today = dayKey(now, g.settings.timezone);
   const used = ((g.dropLog || {})[userId] || []).filter((t) => dayKey(t, g.settings.timezone) === today).length;
-  return Math.max(0, DAILY_DROPS - used);
+  return Math.max(0, dropsPerDay(g) - used);
+}
+// Prochain minuit dans le fuseau du groupe (remise à zéro des questions en plus).
+function nextMidnight(g, now) {
+  const [y, m, d] = dayShift(now, g.settings.timezone, 1);
+  return zonedToUtc(y, m, d, 0, g.settings.timezone);
 }
 function logDrop(g, userId, now) {
   g.dropLog ||= {};
@@ -152,11 +165,30 @@ function cleanUsername(name, exceptId) {
   return u;
 }
 
+// Compte créé sans rien demander (premier lancement) : pas d'identifiant ni de PIN. L'identifiant arrive tout seul
+// en rejoignant un groupe (« nico_4821 ») ; le PIN est optionnel (pour se connecter sur un autre téléphone).
 function newAccount(username, pin, lang) {
-  const salt = crypto.randomBytes(16).toString('hex');
-  const account = { id: newId(), username, salt, pinHash: hashPin(pin, salt), lang: lang ? i18n.lang(lang) : null, createdAt: Date.now() };
+  const salt = pin ? crypto.randomBytes(16).toString('hex') : null;
+  const account = { id: newId(), username: username || null, salt, pinHash: pin ? hashPin(pin, salt) : null, lang: lang ? i18n.lang(lang) : null, createdAt: Date.now() };
   store.db.accounts[account.id] = account;
   return account;
+}
+
+// Identifiant par défaut : le premier mot du pseudo + 4 chiffres (« nico_4821 »), unique dans l'app.
+function defaultUsername(name) {
+  const base = String(name || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+    .split(/[^a-z0-9]+/).find((w) => w.length >= 2) || 'joueur';
+  const taken = new Set(Object.values(store.db.accounts).map((a) => (a.username || '').toLowerCase()));
+  for (let i = 0; ; i++) {
+    const digits = i < 50 ? 4 : 6;
+    const u = `${base.slice(0, 12)}_${String(crypto.randomInt(10 ** digits)).padStart(digits, '0')}`;
+    if (!taken.has(u)) return u;
+  }
+}
+function ensureUsername(account, name) {
+  if (account.username) return false;
+  account.username = defaultUsername(name);
+  return true;
 }
 
 const accountByName = (name) => {
@@ -189,8 +221,105 @@ function claimPlayer(g, account, playerId, name) {
     delete user.salt;
     player.userId = user.id;
   } else user = newUser(g, player, account, false);
+  ensureUsername(account, player.name);
   persist();
   return user;
+}
+
+// ---------- Récupérer son nom (compte perdu) ----------
+// Quelqu'un qui a perdu son compte (téléphone changé, app supprimée…) rejoint avec le code et choisit son nom,
+// déjà pris : ça crée une demande. Pour un membre, un admin valide. Pour un admin, ce sont les autres membres :
+// 2 validations s'il y a au moins 2 autres membres, sinon celle de l'autre. La personne dont on demande le nom
+// peut toujours refuser (si elle a encore son compte, ce n'est pas elle qui demande).
+const CLAIM_TTL = 7 * 24 * 3600 * 1000;
+const activeMembers = (g) => Object.values(g.users).filter((u) => !u.disabled && u.playerId && g.players[u.playerId]);
+
+function claimRule(g, target) {
+  const others = activeMembers(g).filter((u) => u.id !== target.id);
+  if (target.isAdmin) return { voters: 'members', needed: Math.min(2, others.length) };
+  return { voters: 'admins', needed: 1 };
+}
+
+function claimTarget(g, c) {
+  const player = g.players[c.playerId];
+  const user = player && player.userId && g.users[player.userId];
+  return user && !user.disabled ? user : null;
+}
+
+function canApprove(g, c, user) {
+  const target = claimTarget(g, c);
+  if (!target || !user || user.disabled || user.id === target.id) return false;
+  return c.voters === 'members' || !!user.isAdmin;
+}
+
+// Demandes en cours (les vieilles expirent, celles dont le nom n'est plus pris tombent).
+function openClaims(g, now = Date.now()) {
+  const out = [];
+  for (const c of Object.values(g.claims || {})) {
+    if (c.status !== 'open') continue;
+    if (now - c.createdAt > CLAIM_TTL || !claimTarget(g, c) || !store.db.accounts[c.accountId]) {
+      c.status = 'expired';
+      c.closedAt = now;
+      persist();
+      continue;
+    }
+    out.push(c);
+  }
+  return out;
+}
+
+function claimView(g, c, me) {
+  return {
+    id: c.id,
+    playerId: c.playerId,
+    createdAt: c.createdAt,
+    approvals: c.approvals.map((uid) => g.users[uid]?.playerId).filter(Boolean),
+    needed: c.needed,
+    voters: c.voters,
+    canApprove: canApprove(g, c, me),
+    aboutMe: claimTarget(g, c)?.id === me.id,
+  };
+}
+
+// Le nom passe au nouveau compte : votes, messages, admin… tout suit (c'est le même membre du groupe).
+// Les téléphones de l'ancien compte ne reçoivent plus les notifs de ce groupe.
+function grantClaim(g, c, now) {
+  const target = claimTarget(g, c);
+  const account = store.db.accounts[c.accountId];
+  if (!target || !account) return false;
+  target.accountId = account.id;
+  target.lang = account.lang || target.lang || null;
+  g.pushSubs[target.id] = [];
+  ensureUsername(account, g.players[target.playerId].name);
+  c.status = 'done';
+  c.closedAt = now;
+  for (const o of Object.values(g.claims)) {
+    if (o !== c && o.status === 'open' && o.playerId === c.playerId) Object.assign(o, { status: 'superseded', closedAt: now });
+  }
+  persist();
+  live.emit(g.id, 'refresh', {});
+  return true;
+}
+
+function notifyClaim(g, c) {
+  const name = g.players[c.playerId].name;
+  push.notify(g, 'claims', (u) => {
+    if (claimTarget(g, c)?.id === u.id) {
+      return {
+        title: tr(u.lang, '⚠️ Quelqu’un demande ton nom', '⚠️ Someone is asking for your name'),
+        body: tr(u.lang, `Quelqu’un veut récupérer « ${name} » dans ${g.name}. Si ce n’est pas toi, ouvre l’app pour refuser.`, `Someone wants to take back “${name}” in ${g.name}. If it isn’t you, open the app to deny it.`),
+        tag: 'claim-' + c.id,
+        url: '/',
+      };
+    }
+    if (!canApprove(g, c, u)) return null;
+    return {
+      title: tr(u.lang, '🔑 Demande de récupération', '🔑 Account recovery request'),
+      body: tr(u.lang, `« ${name} » a perdu son compte et veut revenir dans ${g.name}. C’est bien lui/elle ? Ouvre l’app pour valider.`, `“${name}” lost their account and wants back into ${g.name}. Is it really them? Open the app to approve.`),
+      tag: 'claim-' + c.id,
+      url: '/',
+    };
+  });
 }
 
 // Petit résumé de chaque groupe pour l'accueil (le « lobby ») : à voter, messages non lus, activité.
@@ -202,6 +331,7 @@ function lobbyFor(account, now) {
     const lastPoll = Math.max(0, ...Object.values(g.polls).map((p) => p.startsAt));
     const lastMsg = (chat.list(g.id, 'general').at(-1) || {}).at || 0;
     const player = g.players[user.playerId];
+    const st = streaks.compute(g, now);
     return {
       id: g.id,
       name: g.name,
@@ -211,13 +341,28 @@ function lobbyFor(account, now) {
       members: Object.values(g.players).filter((p) => p.userId).length,
       todo,
       unread,
+      claims: openClaims(g, now).filter((c) => canApprove(g, c, user) || claimTarget(g, c)?.id === user.id).length,
+      streak: { group: st.group.current, groupToday: st.group.today, mine: (st.players[user.playerId] || {}).current || 0, mineToday: (st.players[user.playerId] || {}).today ?? null },
       activity: Math.max(lastPoll, lastMsg, g.createdAt || 0),
     };
   }).sort((a, b) => b.activity - a.activity);
+  // Mes demandes de récupération (en attente, ou refusées il y a peu).
+  const pending = [];
+  for (const g of Object.values(store.db.groups)) {
+    if (g.claims) openClaims(g, now);
+    for (const c of Object.values(g.claims || {})) {
+      if (c.accountId !== account.id) continue;
+      if (c.status !== 'open' && !(c.status === 'denied' && now - c.closedAt < 3 * 24 * 3600 * 1000 && !c.seen)) continue;
+      const p = g.players[c.playerId];
+      pending.push({ id: c.id, status: c.status, group: g.name, name: p ? p.name : '?', player: p ? publicPlayer(p, g) : null, approvals: c.approvals.length, needed: c.needed, voters: c.voters, createdAt: c.createdAt });
+    }
+  }
   return {
     now,
-    account: { id: account.id, username: account.username || null, lang: account.lang || null },
+    account: { id: account.id, username: account.username || null, lang: account.lang || null, hasPin: !!account.pinHash, owner: isOwner(account) },
     groups,
+    pending,
+    latestNews: changelog.latest().id,
     vapidKey: push.publicKey(),
   };
 }
@@ -499,7 +644,7 @@ function stateFor(g, me, now) {
   return {
     now,
     group: { id: g.id, name: g.name, code: g.code },
-    me: { userId: me.id, playerId: me.playerId, isAdmin: !!me.isAdmin, notif: push.prefs(me), dropsLeft: dropsLeft(g, me.id, now), dropsPerDay: DAILY_DROPS, lang: me.lang || null },
+    me: { userId: me.id, playerId: me.playerId, isAdmin: !!me.isAdmin, notif: push.prefs(me), dropsLeft: dropsLeft(g, me.id, now), dropsPerDay: dropsPerDay(g), dropsResetAt: nextMidnight(g, now), lang: me.lang || null, quizDone: !!((g.profiles || {})[me.id] && Object.keys(g.profiles[me.id].answers || {}).length) },
     colors: COLORS,
     players: Object.values(g.players).sort((a, b) => a.createdAt - b.createdAt).map((p) => publicPlayer(p, g)),
     sets: Object.values(g.sets)
@@ -517,6 +662,10 @@ function stateFor(g, me, now) {
     nextDrop: nextSlot(now, g.settings),
     prevDrop: latestSlot(now, g.settings) || null,
     remainingQuestions: game.unused(g).length,
+    streaks: streaks.compute(g, now),
+    claims: openClaims(g, now).filter((c) => canApprove(g, c, me) || claimTarget(g, c)?.id === me.id).map((c) => claimView(g, c, me)),
+    recaps: recap.months(g, now),
+    latestNews: changelog.latest().id,
     vapidKey: push.publicKey(),
   };
 }
@@ -543,6 +692,10 @@ async function api(req, res, url) {
     case 'GET /health':
       return ok({ ok: true });
 
+    // Nouveautés (les plus récentes d'abord), dans les deux langues.
+    case 'GET /changelog':
+      return ok({ releases: changelog.RELEASES });
+
     // Photo envoyée dans un chat (publique elle aussi : l'identifiant, aléatoire et long, sert de clé).
     case 'GET /images/:id': {
       const img = await images.get(id);
@@ -566,10 +719,11 @@ async function api(req, res, url) {
     }
 
     // Créer son compte (identifiant + PIN). Les groupes se rejoignent / se créent ensuite depuis l'accueil.
+    // Sans identifiant ni PIN : compte créé en silence au premier lancement (on peut ajouter un PIN plus tard).
     case 'POST /accounts':
       return guarded(ip, () => {
-        const username = cleanUsername(body.username);
-        const pin = validPin(body.pin);
+        const username = body.username != null ? cleanUsername(body.username) : null;
+        const pin = body.pin != null || username ? validPin(body.pin) : null;
         checkSignupRate(ip);
         const account = newAccount(username, pin, body.lang);
         ok({ token: newSession(account) });
@@ -592,8 +746,12 @@ async function api(req, res, url) {
     case 'POST /roster':
       return guarded(ip, () => {
         const g = groupByCode(body.code);
-        const players = Object.values(g.players).filter((p) => !p.userId).sort((a, b) => a.createdAt - b.createdAt).map((p) => publicPlayer(p, g));
-        ok({ group: { name: g.name, code: g.code }, players });
+        const byAge = Object.values(g.players).sort((a, b) => a.createdAt - b.createdAt);
+        const players = byAge.filter((p) => !p.userId).map((p) => publicPlayer(p, g));
+        // Noms déjà pris : on peut demander à récupérer le sien (compte perdu).
+        const taken = byAge.filter((p) => p.userId && g.users[p.userId] && !g.users[p.userId].disabled)
+          .map((p) => ({ ...publicPlayer(p, g), isAdmin: !!g.users[p.userId].isAdmin }));
+        ok({ group: { name: g.name, code: g.code }, players, taken });
       });
 
     // Connexion : identifiant + PIN. Ancienne façon (avant les comptes) : code du groupe + pseudo + PIN.
@@ -632,7 +790,7 @@ async function api(req, res, url) {
         for (const m of membersOf(account)) m.user.lang = account.lang; // notifications dans la bonne langue partout
       }
       if (body.pin != null) {
-        if (!checkPin(String(body.oldPin || ''), account)) throw new HttpError(401, 'Ancien PIN incorrect', 'Wrong current PIN');
+        if (account.pinHash && !checkPin(String(body.oldPin || ''), account)) throw new HttpError(401, 'Ancien PIN incorrect', 'Wrong current PIN');
         const pin = validPin(body.pin);
         account.salt = crypto.randomBytes(16).toString('hex');
         account.pinHash = hashPin(pin, account.salt);
@@ -648,6 +806,8 @@ async function api(req, res, url) {
       const g = newGroup(name);
       const player = addPlayer(g, body.name || account.username);
       newUser(g, player, account, true);
+      ensureUsername(account, player.name);
+      if (body.timezone && isValidTimezone(body.timezone)) g.settings.timezone = body.timezone;
       g.colorsV2 = true;
       game.mergeSeed(g);
       // Pas de drop immédiat à la création : le premier arrive au prochain créneau.
@@ -664,6 +824,40 @@ async function api(req, res, url) {
         claimPlayer(g, account, body.playerId, body.name);
         ok({ groupId: g.id });
       });
+
+    // Demander à récupérer son nom (compte perdu) : il faudra une validation (voir claimRule).
+    case 'POST /groups/claim':
+      return guarded(ip, () => {
+        const g = groupByCode(body.code);
+        const player = g.players[body.playerId];
+        const target = player && player.userId && g.users[player.userId];
+        if (!target || target.disabled) throw new HttpError(400, 'Ce nom est libre : rejoins directement', 'This name is free: just join');
+        if (memberIn(g, account)) throw new HttpError(409, 'Tu fais déjà partie de ce groupe', 'You’re already in this group');
+        if (target.accountId === account.id) return ok({ groupId: g.id });
+        const rule = claimRule(g, target);
+        if (!rule.needed) throw new HttpError(400, 'Personne d’autre dans le groupe ne peut confirmer que c’est toi', 'Nobody else in the group can confirm it’s you');
+        g.claims ||= {};
+        for (const c of openClaims(g, now)) if (c.accountId === account.id) Object.assign(c, { status: 'cancelled', closedAt: now });
+        const c = { id: newId(), playerId: player.id, accountId: account.id, createdAt: now, approvals: [], denials: [], ...rule, status: 'open' };
+        g.claims[c.id] = c;
+        persist();
+        live.emit(g.id, 'refresh', {});
+        notifyClaim(g, c);
+        ok({ claim: { id: c.id, needed: c.needed, voters: c.voters } });
+      });
+
+    case 'POST /claims/:id/cancel': {
+      for (const g of Object.values(db.groups)) {
+        const c = (g.claims || {})[id];
+        if (!c || c.accountId !== account.id) continue;
+        if (c.status === 'open') Object.assign(c, { status: 'cancelled', closedAt: now });
+        else c.seen = true; // refus vu : on ne l'affiche plus
+        persist();
+        live.emit(g.id, 'refresh', {});
+        return ok(lobbyFor(account, now));
+      }
+      throw new HttpError(404, 'Demande introuvable', 'Request not found');
+    }
 
     // Rattacher à ce compte un groupe où on avait déjà un compte « à l'ancienne » (code + pseudo + PIN).
     case 'POST /account/link':
@@ -686,6 +880,45 @@ async function api(req, res, url) {
         persist();
         ok({ groupId: g.id });
       });
+
+    // Signaler un bug / donner son avis. Gardé dans la base (les 500 derniers) ; le développeur est prévenu.
+    case 'POST /feedback': {
+      const text = String(body.text || '').replace(/\r/g, '').trim();
+      if (text.length < 3) throw new HttpError(400, 'Écris quelques mots', 'Write a few words');
+      if (text.length > 2000) throw new HttpError(400, 'Trop long (2000 caractères max)', 'Too long (2000 characters max)');
+      checkSendRate('fb:' + account.id);
+      const g = body.groupId && db.groups[body.groupId];
+      const m = g && memberIn(g, account);
+      const item = {
+        id: newId(),
+        at: now,
+        kind: ['bug', 'idea', 'other'].includes(body.kind) ? body.kind : 'other',
+        text,
+        username: account.username || null,
+        group: g ? g.name : null,
+        name: m ? g.players[m.playerId]?.name || null : null,
+        lang: account.lang || null,
+        ua: String(req.headers['user-agent'] || '').slice(0, 200),
+        version: changelog.latest().id,
+      };
+      db.feedback = [item, ...(db.feedback || [])].slice(0, 500);
+      persist();
+      const owner = Object.values(db.accounts).find(isOwner);
+      const om = owner && owner.id !== account.id && membersOf(owner).find(({ g: og, user }) => (og.pushSubs[user.id] || []).length);
+      if (om) {
+        push.sendTo(om.g, om.user.id, {
+          title: `${{ bug: '🐞', idea: '💡', other: '💬' }[item.kind]} ${item.name || item.username || '?'}${item.group ? ' · ' + item.group : ''}`,
+          body: short(text, 160),
+          tag: 'feedback-' + item.id,
+          url: '/?feedback=1',
+        }).catch(() => {});
+      }
+      return ok();
+    }
+
+    case 'GET /feedback':
+      if (!isOwner(account)) throw new HttpError(403, 'Réservé', 'Not allowed');
+      return ok({ items: db.feedback || [] });
 
     // Notifications : ce téléphone reçoit celles de tous les groupes du compte.
     case 'POST /push/subscribe':
@@ -875,6 +1108,7 @@ async function api(req, res, url) {
       }
       const firstVote = !poll.votes[me.id];
       poll.votes[me.id] = half || targets[0];
+      if (firstVote) (poll.votedAt ||= {})[me.id] = now;
       poll.members = Math.max(poll.members || 0, Object.values(g.users).filter((u) => !u.disabled).length);
       persist();
       live.emit(g.id, 'refresh', {}, me.id);
@@ -912,7 +1146,10 @@ async function api(req, res, url) {
 
     case 'POST /drop': {
       if (body.setId && !g.sets[body.setId]) throw new HttpError(404, 'Set introuvable');
-      if (!dropsLeft(g, me.id, now)) throw new HttpError(429, `Tu as déjà lancé ${DAILY_DROPS} questions aujourd’hui. Ça repart à minuit !`, `You already launched ${DAILY_DROPS} questions today. Resets at midnight!`);
+      if (!dropsLeft(g, me.id, now)) {
+        const n = dropsPerDay(g);
+        throw new HttpError(429, n ? `Tu as déjà lancé ${n} question${n > 1 ? 's' : ''} aujourd’hui. Ça repart à minuit !` : 'L’admin a désactivé les questions en plus', n ? `You already launched ${n} question${n > 1 ? 's' : ''} today. Resets at midnight!` : 'The admin turned off extra questions');
+      }
       let q;
       if (body.text) {
         if (!body.setId) throw new HttpError(400, 'Choisis un set pour ta question');
@@ -1003,6 +1240,47 @@ async function api(req, res, url) {
       else delete g.questions[id];
       persist();
       return ok();
+    }
+
+    // --- Récupération de compte : valider / refuser ---
+    case 'POST /claims/:id/approve':
+    case 'POST /claims/:id/deny': {
+      const c = openClaims(g, now).find((x) => x.id === id);
+      if (!c) throw new HttpError(404, 'Demande introuvable (déjà traitée ?)', 'Request not found (already handled?)');
+      const aboutMe = claimTarget(g, c)?.id === me.id;
+      if (route.endsWith('/deny')) {
+        if (!aboutMe && !canApprove(g, c, me)) throw new HttpError(403, 'Tu ne peux pas répondre à cette demande', 'You can’t answer this request');
+        Object.assign(c, { status: 'denied', closedAt: now });
+        c.denials.push(me.id);
+        persist();
+        live.emit(g.id, 'refresh', {});
+        return ok({ status: c.status });
+      }
+      if (!canApprove(g, c, me)) throw new HttpError(403, 'Tu ne peux pas valider cette demande', 'You can’t approve this request');
+      if (!c.approvals.includes(me.id)) c.approvals.push(me.id);
+      if (c.approvals.length >= c.needed) grantClaim(g, c, now);
+      persist();
+      live.emit(g.id, 'refresh', {});
+      return ok({ status: c.status, approvals: c.approvals.length, needed: c.needed });
+    }
+
+    // --- Questionnaire de profil (si l'admin l'a activé) ---
+    case 'GET /quiz':
+      return ok({ enabled: !!g.settings.profiles, items: profile.items(), mine: ((g.profiles || {})[me.id] || {}).answers || {}, summary: profile.summary(g), effects: profile.effects(g) });
+
+    case 'PUT /quiz': {
+      if (!g.settings.profiles) throw new HttpError(400, 'Le questionnaire n’est pas activé dans ce groupe', 'The questionnaire isn’t on in this group');
+      g.profiles ||= {};
+      g.profiles[me.id] = { answers: profile.clean(body.answers), at: now };
+      persist();
+      return ok({ mine: g.profiles[me.id].answers, summary: profile.summary(g), effects: profile.effects(g) });
+    }
+
+    // --- Récap du mois ---
+    case 'GET /recap': {
+      const month = String(url.searchParams.get('month') || recap.monthOf(now, g.settings.timezone));
+      if (!/^\d{4}-\d{2}$/.test(month)) throw new HttpError(400, 'Mois invalide', 'Invalid month');
+      return ok(recap.compute(g, month, me, now));
     }
 
     // --- Notifications (abonnement : voir les routes du compte) ---
@@ -1106,7 +1384,9 @@ async function api(req, res, url) {
         if (!Number.isFinite(n) || n < min || n > max) throw new HttpError(400, `${label} doit être entre ${min} et ${max}`, `${labelEn} has to be between ${min} and ${max}`);
         return n;
       };
-      if (body.intervalHours != null) s.intervalHours = num(body.intervalHours, 0.02, 24, 'L’intervalle', 'The interval');
+      if (body.intervalHours != null) s.intervalHours = num(body.intervalHours, MIN_INTERVAL, 24, 'L’intervalle', 'The interval');
+      if (body.dropsPerDay != null) s.dropsPerDay = Math.round(num(body.dropsPerDay, 0, 10, 'Le nombre de questions en plus', 'The number of extra questions'));
+      if (body.profiles != null) s.profiles = !!body.profiles;
       if (body.startHour != null) s.startHour = Math.round(num(body.startHour, 0, 23, 'L’heure de début', 'The start hour'));
       if (body.endHour != null) s.endHour = Math.round(num(body.endHour, 0, 23, 'L’heure de fin', 'The end hour'));
       if (body.pollHours != null) s.pollHours = num(body.pollHours, 0.02, 168, 'La durée de vote', 'The voting time');
@@ -1192,6 +1472,79 @@ async function api(req, res, url) {
   throw new HttpError(404, 'Route inconnue');
 }
 
+// ---------- Rappels : série en danger, récap du mois ----------
+// Appelé chaque minute. Le soir (2 h avant la fin de la plage horaire, 21 h si elle passe minuit) : un rappel
+// à ceux dont la série d'au moins 3 jours s'arrête ce soir s'ils ne votent pas. Le 1er du mois à partir de
+// 10 h : « le récap du mois est prêt ».
+const monthLabel = (month, lang) => new Date(`${month}-15T12:00:00Z`).toLocaleDateString(lang === 'en' ? 'en-GB' : 'fr-FR', { month: 'long', timeZone: 'UTC' });
+
+function dailyJobs(g, now = Date.now()) {
+  if (!Object.keys(g.users).length) return;
+  const tz = g.settings.timezone;
+  const p = zonedParts(now, tz);
+  const today = streaks.dayKey(now, tz);
+  const s = g.settings;
+  const remindAt = s.endHour > s.startHour ? Math.max(s.startHour + 1, s.endHour - 2) : 21;
+  if (p.hour >= remindAt && g.streakReminded !== today) {
+    g.streakReminded = today;
+    persist();
+    const st = streaks.compute(g, now);
+    const open = Object.values(g.polls).filter((x) => x.endsAt > now);
+    push.notify(g, 'streaks', (u) => {
+      const mine = st.players[u.playerId];
+      if (!mine || mine.current < 3 || mine.today !== false || !open.some((x) => !x.votes[u.id])) return null;
+      return {
+        title: tr(u.lang, `🔥 Ta série de ${mine.current} jours`, `🔥 Your ${mine.current}-day streak`),
+        body: tr(u.lang, `Vote avant minuit pour ne pas la perdre (${g.name}).`, `Vote before midnight to keep it going (${g.name}).`),
+        tag: 'streak',
+        url: '/',
+      };
+    });
+  }
+  if (p.day === 1 && p.hour >= 10) {
+    const [y, m] = dayShift(now, tz, -1);
+    const prev = `${y}-${String(m).padStart(2, '0')}`;
+    if (g.recapSent !== prev) {
+      g.recapSent = prev;
+      persist();
+      const n = Object.values(g.polls).filter((x) => recap.monthOf(x.startsAt, tz) === prev && x.endsAt <= now && Object.keys(x.votes).length).length;
+      if (n >= 3) {
+        push.notify(g, 'polls', (u) => ({
+          title: tr(u.lang, `🎁 Le récap de ${monthLabel(prev, 'fr')} est prêt`, `🎁 Your ${monthLabel(prev, 'en')} recap is ready`),
+          body: tr(u.lang, `Tes stats et celles de ${g.name} sur tout le mois.`, `Your stats and ${g.name}’s for the whole month.`),
+          tag: 'recap',
+          url: '/?recap=' + prev,
+        }));
+      }
+    }
+  }
+}
+
+// ---------- Nouveautés : une notification par nouvelle version ----------
+// Une seule par personne (même avec plusieurs groupes : un téléphone est abonné pour tous ses groupes),
+// dans sa langue. Lancée une minute après le démarrage : pendant un redéploiement, l'ancienne version tourne encore.
+function announceRelease() {
+  const rel = changelog.latest();
+  if (store.db.announced === rel.id) return;
+  store.db.announced = rel.id;
+  persist();
+  let n = 0;
+  for (const a of Object.values(store.db.accounts)) {
+    const m = membersOf(a).find(({ g, user }) => (g.pushSubs[user.id] || []).length && push.prefs(user).news);
+    if (!m) continue;
+    const en = (a.lang || m.user.lang) === 'en';
+    const lines = (en ? rel.en : rel.fr).slice(0, 3).map((l) => l.replace(/^\S+\s/, '').replace(/[:：].*$/, ''));
+    push.sendTo(m.g, m.user.id, {
+      title: (en ? '✨ What’s new: ' : '✨ Nouveautés : ') + rel.title[en ? 'en' : 'fr'],
+      body: short(lines.join(' · '), 170),
+      tag: 'news',
+      url: '/?news=1',
+    }).catch(() => {});
+    n++;
+  }
+  console.log(`Nouveautés ${rel.id} annoncées à ${n} personne(s).`);
+}
+
 // ---------- Fichiers statiques ----------
 
 const TYPES = {
@@ -1270,8 +1623,20 @@ load()
     await photos.load();
     await images.init();
     push.init();
+    // Comptes sans identifiant (créés avant, ou jamais choisi) : un identifiant par défaut d'après leur pseudo.
+    let named = 0;
+    for (const a of Object.values(store.db.accounts)) {
+      if (a.username) continue;
+      const m = membersOf(a)[0];
+      if (m && ensureUsername(a, m.g.players[m.user.playerId]?.name)) named++;
+    }
+    if (named) persist();
+    setTimeout(() => { try { announceRelease(); } catch (e) { console.error('Nouveautés :', e); } }, Number(process.env.ANNOUNCE_DELAY_MS) || 60 * 1000);
     setInterval(() => {
-      for (const g of Object.values(store.db.groups)) game.tick(g);
+      for (const g of Object.values(store.db.groups)) {
+        game.tick(g);
+        try { dailyJobs(g); } catch (e) { console.error('Rappels :', e); }
+      }
     }, 60 * 1000);
     server.listen(PORT, () => {
       console.log(`Qui de nous ? → http://localhost:${PORT}`);

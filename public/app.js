@@ -26,6 +26,11 @@
   let swReg = null;
   let inviteCode = new URLSearchParams(location.search).get('code');
   let pendingGroup = new URLSearchParams(location.search).get('g'); // groupe à ouvrir (lien d'une notification)
+  let pendingRecap = new URLSearchParams(location.search).get('recap'); // récap du mois à ouvrir (notification)
+  let pendingNews = new URLSearchParams(location.search).has('news'); // nouveautés (notification de nouvelle version)
+  let pendingFeedback = new URLSearchParams(location.search).has('feedback'); // avis reçu (développeur)
+  // Fuseau horaire de ce téléphone : toutes les heures sont affichées dans l'heure locale de chacun.
+  const myTz = (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'Europe/Paris'; } catch { return 'Europe/Paris'; } })();
   // Pas de lien : on revient là où on était (actualisation, app rouverte, page rechargée par le téléphone).
   // Le groupe n'est oublié que quand on revient soi-même à l'accueil.
   let restoring = !pendingGroup && !!load('group');
@@ -116,6 +121,7 @@
     lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
     reply: '<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>',
     image: '<rect x="3" y="4" width="18" height="16" rx="3"/><circle cx="9" cy="10" r="2"/><path d="m21 16-5-5-9 9"/>',
+    quiz: '<rect x="5" y="3" width="14" height="18" rx="2.5"/><path d="M9 8h6M9 12h6M9 16h3"/>',
   };
   function icon(name, cls = '') {
     return `<svg class="ico-svg ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ''}</svg>`;
@@ -161,10 +167,29 @@
     return h < 48 ? `${h} h ${String(m % 60).padStart(2, '0')}` : T(`${Math.floor(h / 24)} j`, `${Math.floor(h / 24)} days`);
   }
 
+  // Heures : toujours dans le fuseau de ce téléphone. La plage horaire du groupe est réglée dans le fuseau du
+  // groupe : on la convertit (23 h à Paris = 22 h à Londres).
+  function zParts(t, tz) {
+    const p = {};
+    for (const { type, value } of new Intl.DateTimeFormat('en-CA', { timeZone: tz, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).formatToParts(new Date(t))) p[type] = Number(value);
+    return p;
+  }
+  // Heure h (0–23) du fuseau tz, aujourd'hui → heure de ce téléphone (avec les minutes pour les décalages d'une demi-heure).
+  function hourToLocal(h, tz) {
+    if (!tz || tz === myTz) return h;
+    try {
+      const p = zParts(now(), tz);
+      const off = (t) => { const q = zParts(t, tz); return Date.UTC(q.year, q.month - 1, q.day, q.hour, q.minute) - Math.floor(t / 60000) * 60000; };
+      const guess = Date.UTC(p.year, p.month - 1, p.day, h, 0);
+      const l = zParts(guess - off(guess - off(guess)), myTz);
+      return l.hour + l.minute / 60;
+    } catch { return h; }
+  }
+
   function clock(t) {
-    const opts = { hour: '2-digit', minute: '2-digit', timeZone: state.settings.timezone };
+    const opts = { hour: '2-digit', minute: '2-digit', timeZone: myTz };
     const d = new Date(t);
-    const sameDay = d.toLocaleDateString('fr-FR', { timeZone: state.settings.timezone }) === new Date(now()).toLocaleDateString('fr-FR', { timeZone: state.settings.timezone });
+    const sameDay = d.toLocaleDateString('fr-FR', { timeZone: myTz }) === new Date(now()).toLocaleDateString('fr-FR', { timeZone: myTz });
     const time = d.toLocaleTimeString(LOC, opts);
     return (sameDay ? '' : T('demain ', 'tomorrow ')) + (L ? time : time.replace(':', 'h'));
   }
@@ -376,78 +401,125 @@
     };
   }
 
-  // ---------- Compte : connexion, inscription ----------
-  // Un compte par personne (identifiant + PIN), avec plusieurs groupes. Dans chaque groupe on a son propre
-  // pseudo, sa photo et sa couleur. Les comptes d'avant les comptes multi-groupes se connectent encore
-  // « à l'ancienne » (code du groupe + pseudo + PIN), puis choisissent un identifiant une fois.
-  // mode : 'signup' (créer un compte), 'login' (identifiant + PIN), 'legacy' (à l'ancienne), 'recover' (PIN oublié)
-  function renderAuth(mode, err = '') {
+  // ---------- Compte ----------
+  // Un compte par personne, créé tout seul au premier lancement : rien à inventer (ni identifiant, ni PIN).
+  // En rejoignant un groupe, on reçoit un identifiant par défaut (« nico_4821 », modifiable). Le PIN est optionnel :
+  // il sert à se connecter sur un autre téléphone. Compte perdu : on rejoint le groupe avec son code et on choisit
+  // son nom (déjà pris) → l'admin (ou, pour l'admin, les autres membres) valide que c'est bien nous.
+
+  // Mémoire locale : le dernier état connu (accueil, groupes) est affiché tout de suite au lancement,
+  // puis mis à jour dès que le serveur répond. Plus d'écran d'attente à chaque ouverture.
+  const CACHE_V = 2;
+  let stale = false; // ce qui est affiché vient de la mémoire locale (pas encore rafraîchi)
+  function cacheGet(k) {
+    try {
+      const x = JSON.parse(load('c_' + k) || 'null');
+      return x && x.v === CACHE_V ? x.d : null;
+    } catch { return null; }
+  }
+  function cachePut(k, d) {
+    try {
+      const s = JSON.stringify({ v: CACHE_V, d });
+      if (s.length < 1500000) save('c_' + k, s);
+    } catch { /* plein ou indisponible : tant pis */ }
+  }
+  function cacheClear(keep) {
+    try {
+      for (const k of Object.keys(localStorage)) {
+        if (k.startsWith('qdn_c_') && !(keep && keep(k.slice(6)))) localStorage.removeItem(k);
+      }
+    } catch { /* rien */ }
+  }
+
+  // Écran d'attente (rare grâce à la mémoire locale) : fond normal, logo qui n'apparaît qu'après un instant.
+  const splash = () => '<div class="splash"><span class="splash-logo">🤔</span></div>';
+
+  // Pas encore de compte sur ce téléphone.
+  function renderWelcome(err = '') {
     stopPolling();
     stopLobbyPolling();
     closeSheet();
-    mode = mode || (load('joined') ? 'login' : 'signup');
+    $app.innerHTML = `
+      <div class="auth">
+        <div class="auth-box welcome">
+          ${langSwitch('auth-lang')}
+          <span class="logo-emoji">🤔</span>
+          <h1 class="logo">Qui de nous ?</h1>
+          <p class="tagline">${T('Des questions sur ta bande, plusieurs fois par jour. Tout le monde vote. Verdicts sans pitié.', 'Questions about your crew, a few times a day. Everyone votes. No mercy.')}</p>
+          <button class="btn btn-main btn-block" id="wJoin">${T('Rejoindre un groupe', 'Join a group')}</button>
+          <button class="btn btn-soft btn-block" id="wCreate">${T('Créer un groupe', 'Create a group')}</button>
+          <button class="link-btn welcome-login" id="wLogin">${T('J’ai déjà un compte', 'I already have an account')}</button>
+          <p class="error" id="authErr">${esc(err)}</p>
+        </div>
+      </div>`;
+    bindLangSwitch($app, () => renderWelcome());
+    const go = (then) => async (e) => {
+      const b = e.currentTarget;
+      b.disabled = true;
+      try {
+        await ensureAccount();
+        renderLobby();
+        then();
+      } catch (ex) {
+        document.getElementById('authErr').textContent = ex.message;
+        b.disabled = false;
+      }
+    };
+    document.getElementById('wJoin').onclick = go(() => openJoinSheet());
+    document.getElementById('wCreate').onclick = go(() => openCreateSheet());
+    document.getElementById('wLogin').onclick = () => renderAuth('login');
+  }
 
-    const userField = (label, hint) => `
-      <label for="username">${label}</label>
-      <input class="input" id="username" required maxlength="20" autocapitalize="none" autocomplete="username" spellcheck="false" placeholder="${T('Ex : nico_c', 'e.g. nico_c')}" value="${esc(mode === 'signup' ? '' : load('username') || '')}">
-      ${hint ? `<p class="field-hint">${hint}</p>` : ''}`;
+  // Compte créé en silence (premier vrai geste : rejoindre / créer un groupe, ou lien d'invitation).
+  async function ensureAccount() {
+    if (token) return;
+    const data = await api('POST', 'accounts', { lang: LANG });
+    token = data.token;
+    save('token', token);
+    save('joined', '1');
+    if (!(await loadAccount())) throw new Error(T('Impossible de créer ton compte. Réessaie.', 'Couldn’t create your account. Try again.'));
+  }
 
+  // Connexion sur un autre téléphone : identifiant + PIN. 'legacy' : compte d'avant (code du groupe + pseudo + PIN).
+  function renderAuth(mode = 'login', err = '') {
+    stopPolling();
+    stopLobbyPolling();
+    closeSheet();
     const draw = () => {
-      let fields = '';
-      if (mode === 'signup') {
-        fields = `
-          ${userField(T('Choisis un identifiant', 'Pick a username'), T('Unique dans toute l’app. Tu t’en sers pour te connecter, pour tous tes groupes.', 'Unique across the app. You log in with it, for all your groups.'))}
-          ${pinField()}`;
-      } else if (mode === 'login') {
-        fields = `
-          ${userField(T('Identifiant', 'Username'))}
-          ${pinField()}`;
-      } else if (mode === 'legacy') {
-        fields = `
-          <div class="info">${T('Tu avais un compte avant la mise à jour ? Connecte-toi comme avant : code du groupe, pseudo et PIN. Tu choisiras ensuite un identifiant.', 'Had an account before the update? Log in like before: group code, name and PIN. Then you’ll pick a username.')}</div>
+      const fields = mode === 'login' ? `
+          <label for="username">${T('Identifiant', 'Username')}</label>
+          <input class="input" id="username" required maxlength="20" autocapitalize="none" autocomplete="username" spellcheck="false" placeholder="${T('Ex : nico_4821', 'e.g. nico_4821')}" value="${esc(load('username') || '')}">
+          ${pinField(T('PIN', 'PIN'))}` : `
+          <div class="info">${T('Tu avais un compte avant la mise à jour ? Connecte-toi comme avant : code du groupe, pseudo et PIN.', 'Had an account before the update? Log in like before: group code, name and PIN.')}</div>
           <label for="code">${T('Code du groupe', 'Group code')}</label>
           <input class="input code-input" id="code" required autocapitalize="characters" autocomplete="off" maxlength="12" placeholder="Ex : K7QM2P" value="${esc(load('code') || '')}">
           <label for="name">${T('Pseudo dans ce groupe', 'Your name in that group')}</label>
           <input class="input" id="name" required maxlength="24" value="${esc(load('lastName') || '')}">
-          ${pinField()}`;
-      } else {
-        fields = `
-          <div class="info">${T('Demande à l’admin d’un de tes groupes un <b>code de récupération</b> (Moi → Admin → 🔑 à côté de ton nom). Il marche 48 h.', 'Ask the admin of one of your groups for a <b>recovery code</b> (Me → Admin → 🔑 next to your name). It works for 48 h.')}</div>
-          ${userField(T('Identifiant', 'Username'))}
-          <label for="rcode">${T('Code de récupération', 'Recovery code')}</label>
-          <input class="input code-input" id="rcode" required autocapitalize="characters" autocomplete="off" maxlength="12">
-          ${pinField(T('Nouveau PIN (4 à 6 chiffres)', 'New PIN (4 to 6 digits)'))}`;
-      }
-      const label = { signup: T('Créer mon compte', 'Create my account'), login: T('Entrer', 'Log in'), legacy: T('Entrer', 'Log in'), recover: T('Changer mon PIN', 'Change my PIN') }[mode];
-      const invite = inviteCode ? `<div class="info">${T('Tu as reçu une invitation 🎉 Crée ton compte (ou connecte-toi), et tu rejoindras le groupe juste après.', 'You got an invite 🎉 Create your account (or log in), then you’ll join the group right after.')}</div>` : '';
-
+          ${pinField(T('PIN', 'PIN'))}`;
       $app.innerHTML = `
         <div class="auth">
           <form class="auth-box" id="authForm" autocomplete="on">
             ${langSwitch('auth-lang')}
-            <span class="logo-emoji">🤔</span>
-            <h1 class="logo">Qui de nous ?</h1>
-            <p class="tagline">${T('Une question toutes les 3 h. Tout le monde vote. Verdicts sans pitié.', 'A question every 3 hours. Everyone votes. No mercy.')}</p>
-            ${mode === 'signup' || mode === 'login' ? `
-              <div class="seg">
-                <button type="button" data-mode="signup" class="${mode === 'signup' ? 'on' : ''}">${T('Créer un compte', 'Sign up')}</button>
-                <button type="button" data-mode="login" class="${mode === 'login' ? 'on' : ''}">${T('Connexion', 'Log in')}</button>
-              </div>` : `<button type="button" class="back" data-mode="login">← ${T('Retour', 'Back')}</button>`}
-            ${invite}
+            <button type="button" class="back" id="authBack">← ${T('Retour', 'Back')}</button>
+            <h1 class="logo auth-title">${mode === 'login' ? T('Connexion', 'Log in') : T('Ancien compte', 'Older account')}</h1>
+            ${mode === 'login' ? `<p class="tagline">${T('Ton identifiant est dans Mes groupes → Mon compte, sur ton autre téléphone (avec le PIN que tu y as mis).', 'Your username is in My groups → My account, on your other phone (with the PIN you set there).')}</p>` : ''}
             ${fields}
-            <button class="btn btn-main btn-block" type="submit">${label}</button>
+            <button class="btn btn-main btn-block" type="submit">${T('Entrer', 'Log in')}</button>
             <p class="error" id="authErr">${esc(err)}</p>
             ${mode === 'login' ? `
               <div class="auth-links">
-                <button type="button" class="link-btn" data-mode="recover">${T('PIN oublié ?', 'Forgot your PIN?')}</button>
-                <button type="button" class="link-btn" data-mode="legacy">${T('Compte d’avant la mise à jour (code + pseudo)', 'Account from before the update (code + name)')}</button>
+                <p class="muted small auth-help">${T('Pas de PIN, ou oublié ? Rejoins ton groupe avec son code et choisis ton nom : le groupe confirmera que c’est toi.', 'No PIN, or forgot it? Join your group with its code and pick your name: the group will confirm it’s you.')}</p>
+                <button type="button" class="link-btn" data-mode="legacy">${T('Compte d’avant la mise à jour (code + pseudo + PIN)', 'Account from before the update (code + name + PIN)')}</button>
               </div>` : ''}
           </form>
         </div>`;
-
+      document.getElementById('authBack').onclick = () => {
+        if (mode === 'legacy') { mode = 'login'; err = ''; return draw(); }
+        if (token) startAccount();
+        else renderWelcome();
+      };
       $app.querySelectorAll('[data-mode]').forEach((b) => (b.onclick = () => { mode = b.dataset.mode; err = ''; draw(); }));
       bindLangSwitch($app, draw);
-
       const form = document.getElementById('authForm');
       form.onsubmit = async (e) => {
         e.preventDefault();
@@ -456,18 +528,18 @@
         const val = (id) => (document.getElementById(id) || {}).value || '';
         try {
           let data;
-          if (mode === 'signup') data = await api('POST', 'accounts', { username: val('username'), pin: val('pin'), lang: LANG });
-          else if (mode === 'login') data = await api('POST', 'login', { username: val('username'), pin: val('pin') });
-          else if (mode === 'legacy') {
+          if (mode === 'login') data = await api('POST', 'login', { username: val('username'), pin: val('pin') });
+          else {
             data = await api('POST', 'login', { code: val('code'), name: val('name'), pin: val('pin') });
             save('code', val('code').toUpperCase().trim());
             save('lastName', val('name'));
-          } else data = await api('POST', 'account/recover', { username: val('username'), code: val('rcode'), pin: val('pin') });
+          }
           if (val('username')) save('username', val('username').trim());
           token = data.token;
           save('token', token);
           save('joined', '1');
-          if (mode === 'recover') toast(T('PIN changé 👍', 'PIN changed 👍'));
+          cacheClear();
+          account = null;
           await startAccount();
         } catch (ex) {
           err = ex.message;
@@ -478,38 +550,6 @@
       };
     };
     draw();
-  }
-
-  // Comptes d'avant la mise à jour : on choisit un identifiant une fois (on garde son PIN).
-  function renderUsernameSetup(err = '') {
-    $app.innerHTML = `
-      <div class="auth">
-        <form class="auth-box" id="userForm" autocomplete="on">
-          <span class="logo-emoji">✨</span>
-          <h1 class="logo" style="font-size:1.6rem">${T('Nouveau : un compte pour tous tes groupes', 'New: one account for all your groups')}</h1>
-          <p class="tagline">${T('Choisis un identifiant. Tu te connecteras avec lui et ton PIN actuel, et tu pourras être dans plusieurs groupes. Tes groupes, votes et messages ne bougent pas.', 'Pick a username. You’ll log in with it and your current PIN, and you can be in several groups. Your groups, votes and messages stay as they are.')}</p>
-          <label for="username">${T('Identifiant', 'Username')}</label>
-          <input class="input" id="username" required maxlength="20" autocapitalize="none" autocomplete="username" spellcheck="false" placeholder="${T('Ex : nico_c', 'e.g. nico_c')}">
-          <p class="field-hint">${T('3 à 20 caractères : lettres, chiffres, . _ -', '3 to 20 characters: letters, numbers, . _ -')}</p>
-          <button class="btn btn-main btn-block" type="submit">${T('C’est parti', 'Let’s go')}</button>
-          <p class="error" id="userErr">${esc(err)}</p>
-        </form>
-      </div>`;
-    const form = document.getElementById('userForm');
-    form.onsubmit = async (e) => {
-      e.preventDefault();
-      const btn = form.querySelector('[type=submit]');
-      btn.disabled = true;
-      try {
-        const username = document.getElementById('username').value.trim();
-        account = await api('PATCH', 'account', { username });
-        save('username', username);
-        await startAccount();
-      } catch (ex) {
-        document.getElementById('userErr').textContent = ex.message;
-        btn.disabled = false;
-      }
-    };
   }
 
   // ---------- Accueil : la liste de mes groupes ----------
@@ -523,29 +563,57 @@
       const a = await api('GET', 'account');
       skew = a.now - Math.round((t0 + Date.now()) / 2);
       account = a;
+      cachePut('account', a);
+      // Plus de cache pour les groupes qu'on a quittés.
+      const ids = new Set(a.groups.map((x) => 'st_' + x.id));
+      cacheClear((k) => k === 'account' || ids.has(k));
+      if (a.account.username) save('username', a.account.username);
       // Langue de l'app gardée aussi sur le serveur : les notifications arrivent dans la bonne langue.
-      if (a.account.username && a.account.lang !== LANG) api('PATCH', 'account', { lang: LANG }).then((x) => { account = x; }).catch(() => {});
+      if (a.account.lang !== LANG) api('PATCH', 'account', { lang: LANG }).then((x) => { account = x; }).catch(() => {});
       return true;
     } catch (e) {
-      if (token) toast(e.message);
+      if (token && !stale) toast(e.message);
       return false;
     }
   }
 
-  // Après connexion (ou au démarrage) : identifiant à choisir, groupe à ouvrir (notification), invitation, ou accueil.
+  // Groupe affiché tout de suite depuis la mémoire locale (même onglet qu'avant), le temps que le serveur réponde.
+  function paintGroupFromCache(id, st) {
+    groupId = id;
+    state = st;
+    stale = true;
+    tab = ['live', 'chat', 'sets', 'stats', 'quiz', 'me'].includes(load('tab')) ? load('tab') : 'live';
+    liveMode = load('liveMode') === 'archive' ? 'archive' : 'live';
+    const open = lastChat();
+    if (open && !pendingChat) pendingChat = open;
+    renderMain();
+  }
+
+  // Au démarrage (ou après connexion) : groupe à rouvrir (actualisation, notification), invitation, ou accueil.
   async function startAccount() {
-    $app.innerHTML = '<div class="auth"><span class="logo-emoji">🤔</span></div>';
+    let painted = !!(state || document.getElementById('lobby'));
+    if (!painted && !account) {
+      const acc = cacheGet('account');
+      if (acc) {
+        account = acc;
+        const st = pendingGroup && acc.groups.some((x) => x.id === pendingGroup) ? cacheGet('st_' + pendingGroup) : null;
+        if (st && !inviteCode) { paintGroupFromCache(pendingGroup, st); painted = true; }
+        else if (!pendingGroup && !inviteCode) { renderLobby(); painted = true; }
+      }
+    }
+    if (!painted) $app.innerHTML = splash();
     if (!(await loadAccount())) {
-      if (token) renderAuth('login', T('Impossible de charger. Réessaie.', 'Couldn’t load. Try again.'));
+      if (!token) return;
+      if (painted) { if (state) startPolling(); return; } // hors ligne : on garde ce qui est affiché
+      renderAuth('login', T('Impossible de charger. Vérifie ta connexion et réessaie.', 'Couldn’t load. Check your connection and try again.'));
       return;
     }
-    if (!account.account.username) return renderUsernameSetup();
     syncPush();
     const wanted = pendingGroup && account.groups.find((x) => x.id === pendingGroup);
     const restore = restoring && !inviteCode;
     pendingGroup = null;
     restoring = false;
-    if (wanted && !(inviteCode && restore)) return enterGroup(wanted.id, { restore });
+    if (wanted && !(inviteCode && restore)) return enterGroup(wanted.id, { restore: restore || (state && groupId === wanted.id) });
     if (!wanted) save('group', null); // plus dans ce groupe
     renderLobby();
     if (inviteCode) {
@@ -555,14 +623,28 @@
       if (already) enterGroup(already.id);
       else openJoinSheet(c);
     }
+    if (pendingRecap) openRecapFromLink();
   }
 
   function startLobbyPolling() {
     if (lobbyTimer) return;
+    // Plus souvent quand une demande de récupération attend une réponse.
+    const every = account && account.pending && account.pending.some((p) => p.status === 'open') ? 8000 : 30000;
     lobbyTimer = setInterval(async () => {
       if (document.hidden || state || !token || !document.getElementById('lobby')) return;
-      if (await loadAccount()) if (!state && document.getElementById('lobby') && $sheet.hidden) renderLobby();
-    }, 30000);
+      const before = JSON.stringify(account && account.groups.map((x) => x.id));
+      if (await loadAccount()) {
+        if (!state && document.getElementById('lobby') && $sheet.hidden) {
+          stopLobbyPolling();
+          renderLobby();
+          const now_ = JSON.stringify(account.groups.map((x) => x.id));
+          if (before !== now_ && account.groups.length > JSON.parse(before || '[]').length) {
+            toast(T('C’est validé, te revoilà dans le groupe 🎉', 'Approved, you’re back in the group 🎉'));
+            syncPush(true);
+          }
+        }
+      }
+    }, every);
   }
   function stopLobbyPolling() {
     clearInterval(lobbyTimer);
@@ -572,26 +654,48 @@
   function renderLobby() {
     stopLive();
     stopPolling();
+    stopLobbyPolling();
     state = null;
     groupId = null;
+    stale = false;
+    if (!account) return;
     startLobbyPolling();
     const groups = account.groups;
-    const total = groups.reduce((n, g) => n + g.todo + g.unread, 0);
+    const total = groups.reduce((n, g) => n + g.todo + g.unread + (g.claims || 0), 0);
     document.title = total ? `(${total}) Qui de nous ?` : 'Qui de nous ?';
     if (navigator.setAppBadge) navigator.setAppBadge(total).catch(() => {});
+    const acc = account.account;
 
-    const card = (g) => `
-      <button class="group-card ${g.todo || g.unread ? 'busy' : ''}" data-group="${g.id}">
+    const card = (g) => {
+      const st = g.streak || {};
+      return `
+      <button class="group-card ${g.todo || g.unread || g.claims ? 'busy' : ''}" data-group="${g.id}">
         ${g.me ? avatar(g.me) : '<span class="avatar"></span>'}
         <span class="gc-main">
           <span class="gc-name">${esc(g.name)}</span>
           <span class="gc-meta">${T('toi : ', 'you: ')}<b>${esc(g.me ? g.me.name : '?')}</b> · ${plural(g.members, T('membre', 'member'))}${g.isAdmin ? ' · admin' : ''}</span>
         </span>
         <span class="gc-badges">
+          ${st.group >= 2 ? `<span class="gb streak ${st.groupToday ? 'on' : ''}" title="${T('Série du groupe', 'Group streak')}">🔥${st.group}</span>` : ''}
+          ${g.claims ? `<span class="gb claim" title="${T('Demande à valider', 'Request to approve')}">${icon('key')}${g.claims}</span>` : ''}
           ${g.todo ? `<span class="gb vote" title="${T('À voter', 'To vote')}">${icon('live')}${g.todo}</span>` : ''}
           ${g.unread ? `<span class="gb chat" title="${T('Messages non lus', 'Unread messages')}">${icon('chat')}${g.unread}</span>` : ''}
         </span>
       </button>`;
+    };
+    const pending = (account.pending || []).map((p) => `
+      <div class="card pending-card ${p.status}">
+        ${p.player ? avatar(p.player) : '<span class="avatar"></span>'}
+        <div class="pc-main">
+          <b>${esc(p.name)} · ${esc(p.group)}</b>
+          <span class="muted small">${p.status === 'denied'
+            ? T('Demande refusée. Si c’est une erreur, parles-en au groupe et redemande.', 'Request denied. If that’s a mistake, talk to the group and ask again.')
+            : p.voters === 'admins'
+              ? T('En attente : l’admin doit confirmer que c’est toi.', 'Waiting: the admin has to confirm it’s you.')
+              : T(`En attente : ${p.needed} membre${p.needed > 1 ? 's' : ''} doivent confirmer que c’est toi (${p.approvals}/${p.needed}).`, `Waiting: ${p.needed} member${p.needed > 1 ? 's' : ''} need to confirm it’s you (${p.approvals}/${p.needed}).`)}</span>
+        </div>
+        <button class="link-btn" data-cancelclaim="${p.id}">${p.status === 'denied' ? 'OK' : T('Annuler', 'Cancel')}</button>
+      </div>`).join('');
 
     $app.innerHTML = `
       <header class="top">
@@ -599,7 +703,7 @@
         <button class="theme-btn" id="themeBtn" role="switch"></button>
       </header>
       <main id="lobby" class="lobby">
-        <p class="lobby-hello">${T('Salut', 'Hi')} <b>${esc(account.account.username)}</b> 👋</p>
+        ${pending ? `<div class="section-title">${T('Demandes envoyées', 'Requests sent')}</div>${pending}` : ''}
         <div class="section-title">${T('Tes groupes', 'Your groups')} <span class="count">${groups.length}</span></div>
         ${groups.length ? `<div class="group-list">${groups.map(card).join('')}</div>` : `
           <div class="card empty">${T('Tu n’es dans aucun groupe pour l’instant.<br>Rejoins celui de tes potes avec leur code, ou crée le tien.', 'You’re not in any group yet.<br>Join your friends’ group with their code, or create your own.')}</div>`}
@@ -607,71 +711,104 @@
           <button class="btn btn-main" id="joinBtn">${T('Rejoindre un groupe', 'Join a group')}</button>
           <button class="btn btn-soft" id="createBtn">${T('Créer un groupe', 'Create a group')}</button>
         </div>
-        <button class="link-btn lobby-link" id="linkBtn">${T('J’ai un autre groupe avec un compte d’avant la mise à jour', 'I have another group with an account from before the update')}</button>
 
         <div class="card account-card">
           <div class="card-title">${T('Mon compte', 'My account')}</div>
-          <div class="acc-row"><span class="muted">${T('Identifiant', 'Username')}</span><b>${esc(account.account.username)}</b></div>
+          <div class="acc-row"><span class="muted">${T('Identifiant', 'Username')}</span><span class="acc-val"><b>${esc(acc.username || '—')}</b>${acc.username ? `<button class="icon-btn" id="userBtn" aria-label="${T('Modifier', 'Edit')}">${icon('edit')}</button>` : ''}</span></div>
+          <div class="acc-row"><span class="muted">PIN</span><span class="acc-val">${acc.hasPin ? '••••' : `<span class="muted">${T('aucun', 'none')}</span>`}</span></div>
+          ${acc.hasPin ? '' : `<p class="field-hint">${T('Ajoute un PIN pour pouvoir te connecter sur un autre téléphone (avec ton identifiant).', 'Add a PIN so you can log in on another phone (with your username).')}</p>`}
           <div class="acc-row"><span class="muted">${T('Langue', 'Language')}</span>${langSwitch()}</div>
           <div class="row">
-            <button class="btn btn-soft" id="pinBtn">${T('Changer de PIN', 'Change PIN')}</button>
+            <button class="btn btn-soft" id="pinBtn">${acc.hasPin ? T('Changer de PIN', 'Change PIN') : T('Ajouter un PIN', 'Add a PIN')}</button>
             <button class="btn btn-soft" id="logoutBtn">${T('Se déconnecter', 'Log out')}</button>
           </div>
+          <button class="link-btn lobby-link" id="linkBtn">${T('J’ai un autre groupe avec un compte d’avant la mise à jour', 'I have another group with an account from before the update')}</button>
         </div>
+        ${aboutLinks()}
       </main>`;
 
     document.getElementById('themeBtn').onclick = () => setTheme(isDark() ? 'light' : 'dark');
     paintThemeBtn();
     $app.querySelectorAll('[data-group]').forEach((b) => (b.onclick = () => enterGroup(b.dataset.group)));
+    $app.querySelectorAll('[data-cancelclaim]').forEach((b) => action(b, async () => {
+      const p = account.pending.find((x) => x.id === b.dataset.cancelclaim);
+      if (p && p.status === 'open' && !confirm(T('Annuler ta demande ?', 'Cancel your request?'))) return;
+      account = await api('POST', `claims/${b.dataset.cancelclaim}/cancel`);
+      renderLobby();
+    }));
     document.getElementById('joinBtn').onclick = () => openJoinSheet();
     document.getElementById('createBtn').onclick = () => openCreateSheet();
     document.getElementById('linkBtn').onclick = () => openLinkSheet();
     document.getElementById('pinBtn').onclick = () => openPinSheet();
+    const ub = document.getElementById('userBtn');
+    if (ub) ub.onclick = () => openUsernameSheet();
     bindLangSwitch($app, renderLobby);
+    bindAbout($app);
+    if ($sheet.hidden) openPendingAbout();
     action(document.getElementById('logoutBtn'), async () => {
+      if (!acc.hasPin && groups.length && !confirm(T('Tu n’as pas de PIN : pour revenir, il faudra redemander ton nom à chaque groupe (et attendre qu’on valide). Ajoute plutôt un PIN avant. Te déconnecter quand même ?', 'You have no PIN: to come back, you’d have to ask each group for your name again (and wait for approval). Better add a PIN first. Log out anyway?'))) return;
       try { await api('POST', 'logout'); } catch { /* déjà déconnecté */ }
       logoutLocal();
     });
   }
 
-  // Ouvrir un groupe : on repart d'un état propre (onglet Live)… sauf si on y revient après une actualisation
-  // (opts.restore) : même onglet, mêmes archives, et la discussion qui était ouverte.
+  // Ouvrir un groupe : affiché tout de suite (mémoire locale, sinon squelette), puis rafraîchi.
+  // On repart de l'onglet Live, sauf quand on y revient après une actualisation (opts.restore).
   async function enterGroup(id, opts = {}) {
     stopLobbyPolling();
-    stopLive();
-    stopPolling();
-    closeChat(true);
-    state = null;
-    groupId = id;
-    save('group', id);
-    chats.clear();
-    typing.clear();
-    openPolls.clear();
-    openVoters.clear();
-    editing = null;
-    openSet = null;
-    setDetail = null;
-    statsPlayer = null;
-    archiveSet = '';
-    archiveExtra = null;
-    halfPick = null;
-    if (opts.restore) {
-      tab = ['live', 'chat', 'sets', 'stats', 'me'].includes(load('tab')) ? load('tab') : 'live';
-      liveMode = load('liveMode') === 'archive' ? 'archive' : 'live';
-      const open = lastChat();
-      if (open && !pendingChat) pendingChat = open;
-    } else {
-      tab = 'live';
-      liveMode = 'live';
-      save('tab', tab);
-      save('liveMode', liveMode);
-      save('chat', null);
+    const warm = !!opts.restore && !!state && groupId === id; // déjà à l'écran (mémoire locale)
+    if (!warm) {
+      stopLive();
+      stopPolling();
+      closeChat(true);
+      state = null;
+      groupId = id;
+      chats.clear();
+      typing.clear();
+      openPolls.clear();
+      openVoters.clear();
+      editing = null;
+      openSet = null;
+      setDetail = null;
+      statsPlayer = null;
+      archiveSet = '';
+      archiveExtra = null;
+      halfPick = null;
+      if (opts.restore) {
+        tab = ['live', 'chat', 'sets', 'stats', 'quiz', 'me'].includes(load('tab')) ? load('tab') : 'live';
+        liveMode = load('liveMode') === 'archive' ? 'archive' : 'live';
+        const open = lastChat();
+        if (open && !pendingChat) pendingChat = open;
+      } else {
+        tab = 'live';
+        liveMode = 'live';
+        save('tab', tab);
+        save('liveMode', liveMode);
+        save('chat', null);
+      }
+      pushSynced = false;
+      const cached = cacheGet('st_' + id);
+      if (cached) {
+        state = cached;
+        stale = true;
+        renderMain();
+      } else renderSkeleton(id);
     }
-    pushSynced = false;
-    $app.innerHTML = '<div class="auth"><span class="logo-emoji">🤔</span></div>';
+    save('group', id);
     await refresh();
     if (!state && groupId === id) leaveGroup(); // groupe introuvable : retour à l'accueil
     else syncGuard();
+  }
+
+  // En attendant le serveur (premier passage dans ce groupe) : la même mise en page, vide.
+  function renderSkeleton(id) {
+    const g = account && account.groups.find((x) => x.id === id);
+    $app.innerHTML = `
+      <header class="top">
+        <button class="lobby-btn" aria-hidden="true">${icon('back')}</button>
+        <h1>${esc(g ? g.name : '')}</h1>
+      </header>
+      <main class="skeleton"><div class="sk sk-seg"></div><div class="sk sk-card"></div><div class="sk sk-row"></div><div class="sk sk-row"></div></main>`;
   }
 
   // Retour à l'accueil (bouton ← en haut, ou retour depuis l'onglet Live).
@@ -695,11 +832,19 @@
   }
 
   // Rejoindre un groupe : code → choisir son nom dans la liste → (pseudo, photo) → c'est parti.
+  // Nom déjà pris (compte perdu) : demande de récupération, validée par le groupe.
   function openJoinSheet(code = '') {
     let roster = null;
     let picked = null;
+    let claim = null;
     let photoData = null;
+    let name = '';
     const draw = () => {
+      const taken = roster ? roster.taken || [] : [];
+      const claimWho = (p) => {
+        if (!p.isAdmin) return T('l’admin du groupe doit', 'the group admin has to');
+        return taken.length - 1 >= 2 ? T('2 membres du groupe doivent', '2 members of the group have to') : T('l’autre membre du groupe doit', 'the other member of the group has to');
+      };
       openSheet(`
         <div class="sheet-head"><h2>${T('Rejoindre un groupe', 'Join a group')}</h2><button class="x" data-close>✕</button></div>
         ${!roster ? `
@@ -710,40 +855,62 @@
           <label>${T('Qui es-tu ?', 'Who are you?')}</label>
           ${roster.players.length ? `<div class="pick-grid">${roster.players.map((p) => `
             <button type="button" class="choice ${picked && picked.id === p.id ? 'picked' : ''}" data-pick="${p.id}">${avatar(p)}<span>${esc(p.name)}</span></button>`).join('')}</div>`
-            : `<div class="info">${T('Tout le monde a déjà rejoint. Demande à l’admin d’ajouter ton nom.', 'Everyone already joined. Ask the admin to add your name.')}</div>`}
+            : `<div class="info">${T('Tous les noms sont déjà pris. Demande à l’admin d’ajouter le tien.', 'All names are taken. Ask the admin to add yours.')}</div>`}
           ${picked ? `
             <label for="jname">${T('Ton pseudo dans ce groupe (tu peux le changer)', 'Your name in this group (you can change it)')}</label>
-            <input class="input" id="jname" maxlength="24" value="${esc(picked.name)}">
+            <input class="input" id="jname" maxlength="24" value="${esc(name || picked.name)}">
             <label>${T('Ta photo dans ce groupe', 'Your photo in this group')} <span class="muted">${T('(optionnel)', '(optional)')}</span></label>
             <button type="button" class="photo-pick" id="jPhoto">
               ${photoData ? `<span class="avatar lg has-photo" style="--pc:${esc(picked.color)}"><img src="${photoData}" alt=""></span>` : avatar({ ...picked, photo: null }, 'lg')}
               <span>${photoData ? T('Changer la photo', 'Change photo') : T('Choisir une photo', 'Pick a photo')}<small class="muted">${T('Sinon, tu gardes cet animal', 'Or just keep this animal')}</small></span>
             </button>
-            <button class="btn btn-main btn-block" id="jGo">${T('C’est parti', 'Let’s go')}</button>` : ''}`}`, (root) => {
+            <button class="btn btn-main btn-block" id="jGo">${T('C’est parti', 'Let’s go')}</button>` : ''}
+          ${taken.length ? `
+            <details class="taken-box" ${claim ? 'open' : ''}>
+              <summary>${T('Ton nom est déjà pris ? (compte perdu)', 'Your name is already taken? (lost account)')}</summary>
+              <div class="pick-grid">${taken.map((p) => `
+                <button type="button" class="choice ${claim && claim.id === p.id ? 'picked' : ''}" data-claim="${p.id}">${avatar(p)}<span>${esc(p.name)}</span></button>`).join('')}</div>
+              ${claim ? `
+                <div class="info">${T(`Tu es <b>${esc(claim.name)}</b> et tu as perdu ton compte (nouveau téléphone, app supprimée…) ? On envoie une demande : ${claimWho(claim)} confirmer que c’est bien toi. Tu retrouveras tout : votes, messages, photo.`, `You’re <b>${esc(claim.name)}</b> and lost your account (new phone, app deleted…)? We’ll send a request: ${claimWho(claim)} confirm it’s really you. You’ll get everything back: votes, messages, photo.`)}</div>
+                <button class="btn btn-main btn-block" id="jClaim">${T('Demander à récupérer ce nom', 'Ask to get this name back')}</button>` : ''}
+            </details>` : ''}`}`, (root) => {
         const next = root.querySelector('#jNext');
         if (next) {
           const input = root.querySelector('#jcode');
           input.onkeydown = (e) => { if (e.key === 'Enter') next.click(); };
           action(next, async () => {
+            await ensureAccount();
             roster = await api('POST', 'roster', { code: input.value });
             code = roster.group.code;
-            const mine = account.groups.find((x) => x.code === code);
+            const mine = account && account.groups.find((x) => x.code === code);
             if (mine) { closeSheet(); return enterGroup(mine.id); }
+            if (roster.players.length === 1 && !(roster.taken || []).length) picked = roster.players[0];
             draw();
           });
           if (!code) setTimeout(() => input.focus(), 50);
         }
+        const keepName = () => { const n = root.querySelector('#jname'); if (n) name = n.value; };
         const other = root.querySelector('#jOther');
-        if (other) other.onclick = () => { roster = null; picked = null; draw(); };
-        root.querySelectorAll('[data-pick]').forEach((b) => (b.onclick = () => { picked = roster.players.find((p) => p.id === b.dataset.pick); draw(); }));
+        if (other) other.onclick = () => { roster = null; picked = null; claim = null; draw(); };
+        root.querySelectorAll('[data-pick]').forEach((b) => (b.onclick = () => { picked = roster.players.find((p) => p.id === b.dataset.pick); claim = null; name = ''; draw(); }));
+        root.querySelectorAll('[data-claim]').forEach((b) => (b.onclick = () => { claim = taken.find((p) => p.id === b.dataset.claim); picked = null; draw(); }));
         const ph = root.querySelector('#jPhoto');
-        if (ph) ph.onclick = async () => { const d = await pickPhoto(); if (d) photoData = d; draw(); };
+        if (ph) ph.onclick = async () => { keepName(); const d = await pickPhoto(); if (d) photoData = d; draw(); };
         action(root.querySelector('#jGo'), async () => {
           const r = await api('POST', 'groups/join', { code, playerId: picked.id, name: root.querySelector('#jname').value });
           closeSheet();
+          await loadAccount();
           await enterGroup(r.groupId);
           if (photoData && state) await api('POST', 'me/photo', { data: photoData }).then(refresh).catch((e2) => toast(e2.message));
+          syncPush(true);
           confetti();
+        });
+        action(root.querySelector('#jClaim'), async () => {
+          await api('POST', 'groups/claim', { code, playerId: claim.id });
+          closeSheet();
+          await loadAccount();
+          renderLobby();
+          toast(T('Demande envoyée 👍 On te fait entrer dès que c’est validé.', 'Request sent 👍 You’ll be let in as soon as it’s approved.'));
         });
       });
     };
@@ -751,18 +918,18 @@
     if (code) setTimeout(() => document.getElementById('jNext')?.click(), 0);
   }
 
-  // Créer un groupe : on en devient l'admin.
+  // Créer un groupe : on en devient l'admin. Le fuseau horaire du groupe = celui de ce téléphone.
   function openCreateSheet() {
     let photoData = null;
     let groupName = '';
-    let name = account.account.username;
+    let name = '';
     const draw = () => openSheet(`
       <div class="sheet-head"><h2>${T('Créer un groupe', 'Create a group')}</h2><button class="x" data-close>✕</button></div>
       <div class="info">${T('👑 Tu seras l’admin : tu ajouteras ensuite les noms de tes potes, et tu auras un code à leur envoyer.', '👑 You’ll be the admin. Next, you’ll add your friends’ names and get a code to send them.')}</div>
       <label for="cgroup">${T('Nom du groupe', 'Group name')}</label>
       <input class="input" id="cgroup" maxlength="40" placeholder="${T('Ex : Les Bouffons', 'e.g. The Clowns')}" value="${esc(groupName)}">
       <label for="cname">${T('Ton pseudo dans ce groupe', 'Your name in this group')}</label>
-      <input class="input" id="cname" maxlength="24" value="${esc(name)}">
+      <input class="input" id="cname" maxlength="24" placeholder="${T('Ex : Nico', 'e.g. Nico')}" value="${esc(name)}">
       <label>${T('Ta photo dans ce groupe', 'Your photo in this group')} <span class="muted">${T('(optionnel)', '(optional)')}</span></label>
       <button type="button" class="photo-pick" id="cPhoto">
         ${photoData ? `<span class="avatar lg has-photo" style="--pc:#7b2ff7"><img src="${photoData}" alt=""></span>` : avatar({ id: 'me', color: '#7b2ff7', animal: 0, name: '' }, 'lg')}
@@ -773,14 +940,18 @@
       root.querySelector('#cPhoto').onclick = async () => { keep(); const d = await pickPhoto(); if (d) photoData = d; draw(); };
       action(root.querySelector('#cGo'), async () => {
         keep();
-        const r = await api('POST', 'groups', { groupName, name });
+        if (name.trim().length < 2) throw new Error(T('Choisis ton pseudo dans ce groupe', 'Pick your name in this group'));
+        await ensureAccount();
+        const r = await api('POST', 'groups', { groupName, name, timezone: myTz });
         closeSheet();
+        await loadAccount();
         await enterGroup(r.groupId);
         if (!state) return;
         if (photoData) await api('POST', 'me/photo', { data: photoData }).catch((e2) => toast(e2.message));
         tab = 'me';
         save('tab', tab);
         await refresh();
+        syncPush(true);
         confetti();
         showInvite(true);
       });
@@ -792,7 +963,7 @@
   function openLinkSheet() {
     openSheet(`
       <div class="sheet-head"><h2>${T('Rattacher un groupe', 'Add a group')}</h2><button class="x" data-close>✕</button></div>
-      <p class="muted small" style="margin:0 0 10px">${T('Avant, il fallait un compte par groupe. Entre le code de l’autre groupe, ton pseudo et ton PIN de là-bas : il rejoint ton compte, avec tes votes et tes messages.', 'Before, you needed one account per group. Enter the other group’s code, your name and your PIN there: it moves into this account, with your votes and messages.')}</p>
+      <p class="muted small" style="margin:0 0 10px">${T('Avant, il fallait un compte par groupe. Entre le code de l’autre groupe, ton pseudo et ton PIN de là-bas : il rejoint ce compte, avec tes votes et tes messages.', 'Before, you needed one account per group. Enter the other group’s code, your name and your PIN there: it moves into this account, with your votes and messages.')}</p>
       <label for="lcode">${T('Code du groupe', 'Group code')}</label>
       <input class="input code-input" id="lcode" autocapitalize="characters" autocomplete="off" maxlength="12">
       <label for="lname">${T('Ton pseudo dans ce groupe', 'Your name in that group')}</label>
@@ -810,16 +981,39 @@
     });
   }
 
+  // PIN : optionnel. Sans PIN encore : pas besoin de l'ancien.
   function openPinSheet() {
+    const has = account.account.hasPin;
     openSheet(`
-      <div class="sheet-head"><h2>${T('Changer de PIN', 'Change PIN')}</h2><button class="x" data-close>✕</button></div>
-      ${pinField(T('PIN actuel', 'Current PIN'), 'oldPin')}
+      <div class="sheet-head"><h2>${has ? T('Changer de PIN', 'Change PIN') : T('Ajouter un PIN', 'Add a PIN')}</h2><button class="x" data-close>✕</button></div>
+      ${has ? '' : `<p class="muted small" style="margin:0 0 6px">${T(`Pour te connecter sur un autre téléphone : ton identifiant <b>${esc(account.account.username || '')}</b> + ce PIN.`, `To log in on another phone: your username <b>${esc(account.account.username || '')}</b> + this PIN.`)}</p>`}
+      ${has ? pinField(T('PIN actuel', 'Current PIN'), 'oldPin') : ''}
       ${pinField(T('Nouveau PIN (4 à 6 chiffres)', 'New PIN (4 to 6 digits)'), 'newPin')}
       <button class="btn btn-main btn-block" id="pGo">${T('Enregistrer', 'Save')}</button>`, (root) => {
       action(root.querySelector('#pGo'), async () => {
-        account = await api('PATCH', 'account', { oldPin: root.querySelector('#oldPin').value, pin: root.querySelector('#newPin').value });
+        account = await api('PATCH', 'account', { oldPin: has ? root.querySelector('#oldPin').value : undefined, pin: root.querySelector('#newPin').value });
+        cachePut('account', account);
         closeSheet();
-        toast(T('PIN changé 👍', 'PIN changed 👍'));
+        toast(has ? T('PIN changé 👍', 'PIN changed 👍') : T('PIN ajouté 👍', 'PIN added 👍'));
+        if (!state) renderLobby();
+      });
+    });
+  }
+
+  function openUsernameSheet() {
+    openSheet(`
+      <div class="sheet-head"><h2>${T('Ton identifiant', 'Your username')}</h2><button class="x" data-close>✕</button></div>
+      <p class="muted small" style="margin:0 0 6px">${T('Il sert seulement à te connecter sur un autre téléphone (avec ton PIN). Dans les groupes, on voit ton pseudo.', 'It’s only used to log in on another phone (with your PIN). In groups, people see your name.')}</p>
+      <input class="input" id="uName" maxlength="20" autocapitalize="none" spellcheck="false" value="${esc(account.account.username || '')}">
+      <p class="field-hint">${T('3 à 20 caractères : lettres, chiffres, . _ -', '3 to 20 characters: letters, numbers, . _ -')}</p>
+      <button class="btn btn-main btn-block" id="uGo">${T('Enregistrer', 'Save')}</button>`, (root) => {
+      action(root.querySelector('#uGo'), async () => {
+        account = await api('PATCH', 'account', { username: root.querySelector('#uName').value.trim() });
+        cachePut('account', account);
+        save('username', account.account.username);
+        closeSheet();
+        toast(T('Identifiant changé 👍', 'Username changed 👍'));
+        if (!state) renderLobby();
       });
     });
   }
@@ -894,7 +1088,8 @@
     closeChat(true);
     chats.clear();
     save('token', null);
-    renderAuth('login');
+    cacheClear();
+    renderWelcome();
   }
 
   // ---------- Données ----------
@@ -902,9 +1097,13 @@
   async function refresh() {
     try {
       const t0 = Date.now();
+      const gid = groupId;
       const next = await api('GET', 'state');
+      if (gid !== groupId) return; // on a changé de groupe entre-temps
       skew = next.now - Math.round((t0 + Date.now()) / 2);
       state = next;
+      stale = false;
+      cachePut('st_' + gid, next);
       renderMain();
       startPolling();
       startLive();
@@ -918,6 +1117,9 @@
         pendingChat = null;
         if (ch === 'general' || state.live.some((p) => p.id === ch) || state.archive.some((p) => p.id === ch)) openChat(ch);
       }
+      if (pendingRecap) openRecapFromLink();
+      if ($sheet.hidden) openPendingAbout();
+      checkClaims();
     } catch (e) {
       if (token) toast(e.message);
     }
@@ -931,13 +1133,18 @@
   async function softRefresh() {
     if (!token) return;
     try {
+      const gid = groupId;
       const next = await api('GET', 'state');
+      if (gid !== groupId || !state) return;
       const changed = JSON.stringify({ ...next, now: 0 }) !== JSON.stringify({ ...state, now: 0 });
       state = next;
+      stale = false;
+      if (changed) cachePut('st_' + gid, next);
       if (busy() || !changed) renderNav();
       else renderMain();
       if (chatOpen) renderChatHeader();
       clearNotifs();
+      checkClaims();
     } catch { /* on réessaiera */ }
   }
 
@@ -1013,6 +1220,7 @@
         <header class="top">
           <button class="lobby-btn" id="lobbyBtn" aria-label="${T('Mes groupes', 'My groups')}">${icon('back')}</button>
           <h1 id="groupTitle"></h1>
+          <button class="streak-chip" id="streakChip" aria-label="${T('Séries', 'Streaks')}"></button>
           <button class="theme-btn" id="themeBtn" role="switch"></button>
           <button class="me-chip" id="meChip"></button>
         </header>
@@ -1020,6 +1228,7 @@
         <nav class="nav"><div class="nav-inner" id="nav"></div></nav>`;
       document.getElementById('meChip').onclick = () => go('me');
       document.getElementById('lobbyBtn').onclick = () => leaveGroup();
+      document.getElementById('streakChip').onclick = () => openStreakSheet();
       document.getElementById('themeBtn').onclick = () => setTheme(isDark() ? 'light' : 'dark');
       paintThemeBtn();
     }
@@ -1041,8 +1250,14 @@
       ['chat', 'chat', 'Chat', unread],
       ['sets', 'sets', 'Sets', 0],
       ['stats', 'stats', 'Stats', 0],
+      ...(state.settings.profiles ? [['quiz', 'quiz', 'Quiz', state.me.quizDone ? 0 : '!']] : []),
       ['me', 'me', T('Moi', 'Me'), 0],
     ];
+    const chip = document.getElementById('streakChip');
+    if (chip && state.streaks) {
+      chip.innerHTML = streakChip();
+      chip.classList.toggle('pending', myStreak().today === false);
+    }
     const nav = document.getElementById('nav');
     if (!nav) return;
     nav.innerHTML = items
@@ -1097,7 +1312,8 @@
     // Pendant l'animation d'un vote, on ne redessine pas l'écran (on le fera juste après).
     if (animating) { pendingRender = true; return; }
     syncGuard();
-    ({ live: renderLive, chat: renderChatList, sets: renderSets, stats: renderStats, me: renderMe }[tab] || renderLive)(view);
+    if (tab === 'quiz' && !state.settings.profiles) tab = 'live';
+    ({ live: renderLive, chat: renderChatList, sets: renderSets, stats: renderStats, quiz: renderQuiz, me: renderMe }[tab] || renderLive)(view);
   }
 
   // ---------- Cartes de sondage ----------
@@ -1453,6 +1669,7 @@
   // 3) elle se replie en douceur et rejoint « Déjà voté », où sa ligne brille un instant.
   async function castVote(card, id, body, chosen) {
     if (animating || !card) return;
+    if (stale) return toast(T('Un instant, mise à jour…', 'One sec, updating…'));
     const firstVote = !(findPoll(id) || {}).myVote;
     animating = true;
     card.querySelectorAll('[data-vote], .half-row button').forEach((x) => (x.disabled = true));
@@ -1501,6 +1718,60 @@
     else state.live.unshift(poll);
   }
 
+  // ---------- Demandes de récupération (compte perdu) ----------
+  // Ceux qui peuvent valider (l'admin, ou les membres pour un admin) et la personne concernée voient une fenêtre
+  // une fois, puis un bandeau en haut de Live tant que la demande est ouverte.
+  const seenClaims = new Set();
+  const claimsForMe = () => (state && state.claims ? state.claims : []).filter((c) => c.aboutMe || (c.canApprove && !c.approvals.includes(state.me.playerId)));
+
+  function claimBanner() {
+    return claimsForMe().map((c) => {
+      const p = player(c.playerId);
+      return `<button class="claim-banner ${c.aboutMe ? 'warn' : ''}" data-claimopen="${c.id}">${avatar(p, 'sm')}<span>${c.aboutMe
+        ? T('Quelqu’un demande à récupérer <b>ton</b> nom', 'Someone is asking for <b>your</b> name')
+        : T(`<b>${esc(p.name)}</b> a perdu son compte et demande à revenir`, `<b>${esc(p.name)}</b> lost their account and wants back in`)}</span>${icon('key')}</button>`;
+    }).join('');
+  }
+
+  function checkClaims() {
+    if (!state || !$sheet.hidden || animating || chatOpen || stale) return;
+    const c = claimsForMe().find((x) => !seenClaims.has(x.id));
+    if (c) openClaimSheet(c.id);
+  }
+
+  function openClaimSheet(id) {
+    const c = (state.claims || []).find((x) => x.id === id);
+    if (!c) return;
+    seenClaims.add(id);
+    const p = player(c.playerId);
+    const by = c.approvals.map(player);
+    const canOk = c.canApprove && !c.approvals.includes(state.me.playerId);
+    openSheet(`
+      <div class="sheet-head"><h2>${c.aboutMe ? T('⚠️ On demande ton nom', '⚠️ Someone wants your name') : T('🔑 Compte perdu', '🔑 Lost account')}</h2><button class="x" data-close>✕</button></div>
+      <div class="claim-who">${avatar(p, 'lg')}<b>${esc(p.name)}</b></div>
+      <p class="muted">${c.aboutMe
+        ? T('Quelqu’un dit être toi et avoir perdu son compte. Si ce n’est pas toi, refuse : la demande s’arrête là.', 'Someone says they’re you and lost their account. If it isn’t you, deny it: the request stops there.')
+        : T(`Quelqu’un dit être <b>${esc(p.name)}</b> et avoir perdu son compte (nouveau téléphone, app supprimée…). Valide seulement si tu es sûr·e que c’est bien lui/elle : demande-lui en vrai !`, `Someone says they’re <b>${esc(p.name)}</b> and lost their account (new phone, app deleted…). Only approve if you’re sure it’s really them: ask them in real life!`)}</p>
+      ${c.needed > 1 ? `<p class="small muted">${T(`Il faut ${c.needed} validations`, `It needs ${c.needed} approvals`)} : ${c.approvals.length}/${c.needed}${by.length ? ' · ' + by.map((u) => esc(u.name)).join(', ') : ''}</p>` : ''}
+      <div class="row">
+        <button class="btn btn-soft" id="clDeny">${c.aboutMe ? T('Pas moi : refuser', 'Not me: deny') : T('Refuser', 'Deny')}</button>
+        ${canOk ? `<button class="btn btn-main" id="clOk">${T('C’est bien lui/elle', 'It’s really them')}</button>` : `<button class="btn btn-main" data-close>${T('Plus tard', 'Later')}</button>`}
+      </div>`, (root) => {
+      action(root.querySelector('#clDeny'), async () => {
+        await api('POST', `claims/${id}/deny`);
+        closeSheet();
+        toast(T('Demande refusée', 'Request denied'));
+        await refresh();
+      });
+      action(root.querySelector('#clOk'), async () => {
+        const r = await api('POST', `claims/${id}/approve`);
+        closeSheet();
+        toast(r.status === 'done' ? T(`C’est fait : ${p.name} est de retour 🎉`, `Done: ${p.name} is back 🎉`) : T('Validé 👍 Il manque encore une validation.', 'Approved 👍 One more approval needed.'));
+        await refresh();
+      });
+    });
+  }
+
   // ---------- Live ----------
 
   function liveSwitch() {
@@ -1527,6 +1798,8 @@
     const done = state.live.filter((p) => p.myVote);
 
     view.innerHTML = `
+      ${claimBanner()}
+      ${recapBanner()}
       ${installBanner()}
       <div class="live-head">${liveSwitch()}${dropMeter()}</div>
       ${!state.live.length ? `
@@ -1541,6 +1814,8 @@
     bindPollCards(view);
     bindLiveSwitch(view);
     bindInstallBanner();
+    view.querySelectorAll('[data-claimopen]').forEach((b) => (b.onclick = () => openClaimSheet(b.dataset.claimopen)));
+    view.querySelectorAll('[data-recap]').forEach((b) => (b.onclick = () => openRecap(b.dataset.recap)));
     document.getElementById('fab').onclick = () => openDropSheet();
     const dt = document.getElementById('doneToggle');
     if (dt) dt.onclick = () => { doneFolded = !doneFolded; save('doneFolded', doneFolded ? '1' : null); renderView(); };
@@ -1631,6 +1906,7 @@
   // « Une question toutes les 3 h, de 10 h à 23 h » (la plage peut finir le lendemain).
   function scheduleText(st) {
     const every = L ? String(st.intervalHours) : String(st.intervalHours).replace('.', ',');
+    st = { ...st, startHour: hourToLocal(st.startHour, st.timezone), endHour: hourToLocal(st.endHour, st.timezone) };
     const wraps = st.endHour < st.startHour;
     const allDay = (st.endHour + 1) % 24 === st.startHour && st.intervalHours <= 1;
     const freq = Number(st.intervalHours) === 1 ? T('Une question toutes les heures', 'A question every hour') : T(`Une question toutes les ${every} h`, `A question every ${every}h`);
@@ -1638,7 +1914,11 @@
     return T(`${freq}, de ${st.startHour} h à ${st.endHour} h${wraps ? ' (le lendemain)' : ''}.`,
       `${freq}, from ${hourLabel(st.startHour)} to ${hourLabel(st.endHour)}${wraps ? ' (next day)' : ''}.`);
   }
-  const hourLabel = (h) => (L ? `${h}:00` : `${h} h`);
+  const hourLabel = (h) => {
+    const hh = Math.floor(h);
+    const mm = String(Math.round((h % 1) * 60)).padStart(2, '0');
+    return L ? `${hh}:${mm}` : `${hh} h${mm === '00' ? '' : mm}`;
+  };
 
   // L'anneau avance tout seul, sans redessiner l'écran.
   setInterval(() => {
@@ -1728,34 +2008,60 @@
     bind($sheet);
   }
 
+  // Un seul bouton : avec du texte → « Lancer ma question », sans texte → « Question surprise ».
+  // Le brouillon reste (changement de set, fermeture de la fenêtre) jusqu'à ce que la question parte.
   function openDropSheet(presetSet = '') {
     let setId = presetSet;
+    let draft = load('dropDraft') || '';
     const sets = state.sets;
     const draw = () => {
       const s = setId ? setOf(setId) : null;
       const leftToday = state.me.dropsLeft;
       const none = leftToday <= 0;
+      const off = state.me.dropsPerDay <= 0;
+      const reset = state.settings.timezone === myTz ? T('à minuit', 'at midnight') : T(`à ${clock(state.me.dropsResetAt)}`, `at ${clock(state.me.dropsResetAt)}`);
       openSheet(`
         <div class="sheet-head"><h2>${T('Lancer une question', 'Launch a question')}</h2><button class="x" data-close>✕</button></div>
-        <p class="drops-left ${none ? 'empty' : ''}">${none
-          ? T(`Tu as utilisé tes ${state.me.dropsPerDay} questions du jour. Ça repart à minuit.`, `You used your ${state.me.dropsPerDay} questions for today. Resets at midnight.`)
-          : T(`Il te reste <b>${leftToday}</b> question${leftToday > 1 ? 's' : ''} sur ${state.me.dropsPerDay} aujourd’hui. Elle part tout de suite pour ${pollDuration()}.`, `You’ve got <b>${leftToday}</b> question${leftToday > 1 ? 's' : ''} out of ${state.me.dropsPerDay} left today. It goes out right away for ${pollDuration()}.`)}</p>
+        <p class="drops-left ${none ? 'empty' : ''}">${off
+          ? T('L’admin a désactivé les questions en plus dans ce groupe.', 'The admin turned off extra questions in this group.')
+          : none
+            ? T(`Tu as utilisé ${state.me.dropsPerDay > 1 ? `tes ${state.me.dropsPerDay} questions` : 'ta question'} en plus du jour. Ça repart ${reset}.`, `You used your extra question${state.me.dropsPerDay > 1 ? 's' : ''} for today. Resets ${reset}.`)
+            : T(`Il te reste <b>${leftToday}</b> question${leftToday > 1 ? 's' : ''} en plus aujourd’hui (sur ${state.me.dropsPerDay}). Elle part tout de suite, pour ${pollDuration()}.`, `You’ve got <b>${leftToday}</b> extra question${leftToday > 1 ? 's' : ''} left today (out of ${state.me.dropsPerDay}). It goes out right away, for ${pollDuration()}.`)}</p>
         <label>Set</label>
         <div class="set-chips">
           <button class="chip ${!setId ? 'on' : ''}" data-set="">${T('N’importe lequel', 'Any')}</button>
           ${sets.map((x) => `<button class="chip ${setId === x.id ? 'on' : ''} ${x.spicy ? 'spicy' : ''}" data-set="${x.id}">${esc(setName(x))}</button>`).join('')}
         </div>
-        <button class="btn btn-main btn-block" id="dropRandom" ${none || (s && !s.remaining) ? 'disabled' : ''}>${T('Question surprise', 'Surprise question')}${s ? ` (${s.remaining} ${T('dispo', 'left')})` : ''}</button>
-        <div class="or">${T('ou écris la tienne', 'or write your own')}</div>
-        <textarea class="input" id="ownQ" maxlength="200" placeholder="${s ? T('Qui serait le plus susceptible de…', 'Who would be most likely to…') : T('Choisis d’abord un set', 'Pick a set first')}" ${s && !none ? '' : 'disabled'}></textarea>
-        <p class="muted small" style="margin:6px 0 0">${T('Elle apparaîtra avec ton nom, comme question perso.', 'It’ll show up with your name, as your own question.')}</p>
-        <button class="btn btn-soft btn-block" id="dropOwn" ${s && !none ? '' : 'disabled'}>${T('Lancer ma question', 'Launch my question')}</button>`, (root) => {
-        root.querySelectorAll('[data-set]').forEach((b) => (b.onclick = () => { setId = b.dataset.set; draw(); }));
-        action(root.querySelector('#dropRandom'), () => drop({ setId: setId || undefined }));
-        action(root.querySelector('#dropOwn'), () => {
-          const text = root.querySelector('#ownQ').value.trim();
+        <label for="ownQ">${T('Ta question', 'Your question')} <span class="muted">${T('(sinon : une question surprise du set)', '(or leave empty for a surprise question)')}</span></label>
+        <textarea class="input" id="ownQ" maxlength="200" placeholder="${T('Qui serait le plus susceptible de…', 'Who would be most likely to…')}" ${none ? 'disabled' : ''}>${esc(draft)}</textarea>
+        <p class="muted small own-hint" id="ownHint" ${draft.trim() ? '' : 'hidden'}>${T('Elle apparaîtra avec ton nom, comme question perso.', 'It’ll show up with your name, as your own question.')}</p>
+        <button class="btn btn-main btn-block" id="dropGo" ${none ? 'disabled' : ''}></button>`, (root) => {
+        const area = root.querySelector('#ownQ');
+        const go = root.querySelector('#dropGo');
+        const label = () => {
+          const own = draft.trim().length > 0;
+          go.textContent = own ? T('Lancer ma question', 'Launch my question') : `${T('Question surprise', 'Surprise question')}${s ? ` · ${s.remaining} ${T('dispo', 'left')}` : ''}`;
+          go.disabled = none || (!own && s && !s.remaining);
+          root.querySelector('#ownHint').hidden = !own;
+        };
+        label();
+        area.oninput = () => {
+          draft = area.value;
+          save('dropDraft', draft || null);
+          label();
+        };
+        root.querySelectorAll('[data-set]').forEach((b) => (b.onclick = () => { draft = area.value; setId = b.dataset.set; draw(); }));
+        action(go, async () => {
+          const text = draft.trim();
+          if (!text) return drop({ setId: setId || undefined });
           if (text.length < 8) throw new Error(T('Écris une vraie question', 'Write a real question'));
-          return drop({ setId, text });
+          if (!setId) {
+            root.querySelector('.set-chips').classList.add('shake');
+            setTimeout(() => root.querySelector('.set-chips')?.classList.remove('shake'), 600);
+            throw new Error(T('Choisis le set de ta question', 'Pick a set for your question'));
+          }
+          await drop({ setId, text });
+          save('dropDraft', null);
         });
       });
     };
@@ -1774,7 +2080,7 @@
     replacePoll(poll);
     state.me.dropsLeft = dropsLeft;
     closeSheet();
-    toast(T(`Question lancée · encore ${dropsLeft} aujourd’hui`, `Question launched · ${dropsLeft} left today`));
+    toast(poll.custom ? T('Ta question est lancée 🚀', 'Your question is live 🚀') : T(`Question lancée · encore ${dropsLeft} aujourd’hui`, `Question launched · ${dropsLeft} left today`));
     tab = 'live';
     save('tab', tab);
     await refresh();
@@ -1962,6 +2268,9 @@
     view.querySelectorAll('[data-player]').forEach((b) => (b.onclick = () => { statsPlayer = b.dataset.player; renderView(); }));
     view.querySelectorAll('[data-smode]').forEach((b) => (b.onclick = () => { statsMode = b.dataset.smode; save('statsMode', statsMode); renderView(); }));
     view.querySelectorAll('[data-goto]').forEach((b) => (b.onclick = () => { statsPlayer = b.dataset.goto; renderView(); window.scrollTo({ top: 0, behavior: 'smooth' }); }));
+    view.querySelectorAll('[data-recap]').forEach((b) => (b.onclick = () => openRecap(b.dataset.recap)));
+    const sc = document.getElementById('streakCard');
+    if (sc) sc.onclick = () => openStreakSheet();
   }
 
   function statsProfile(pid) {
@@ -1980,7 +2289,7 @@
       const rows = state.players
         .map((u) => ({ u, v: (st.players[u.id] || { value: {} }).value[d.key] || 0 }))
         .sort((a, b) => b.v - a.v)
-        .filter((r) => r.v > 0)
+        .filter((r) => (st.players[r.u.id] || {}).polls > 0)
         .slice(0, 5);
       return `
         <div class="card rank-card">
@@ -2039,14 +2348,16 @@
       }
       return top;
     };
-    const fan = best(others, (u) => aff.pairs[u.id][pid].given, 0);
+    // Ceux qui votent : pas les noms jamais réclamés (ils n'ont jamais pu voter) ni ceux qui n'ont presque pas voté.
+    const voters = others.filter((u) => u.claimed && (aff.players[u.id] || {}).voted >= 3);
+    const fan = best(voters, (u) => aff.pairs[u.id][pid].given, 0);
     const target = best(others, (u) => row[u.id].given, 0);
-    const twin = best(others, agreeOf);
-    const opposite = best(others, (u) => (agreeOf(u) == null ? null : 100 - agreeOf(u)));
+    const twin = best(voters, agreeOf);
+    const opposite = best(voters, (u) => (agreeOf(u) == null ? null : 100 - agreeOf(u)));
     const rep = best(others, (u) => row[u.id].sim);
     const antiRep = best(others, (u) => (row[u.id].sim == null ? null : 100 - row[u.id].sim));
     const duo = best(others, (u) => row[u.id].co, 0);
-    const oneWay = best(others, (u) => {
+    const oneWay = best(voters, (u) => {
       const out = row[u.id].given;
       const back = aff.pairs[u.id][pid].given;
       return out >= 2 && back === 0 ? out : null;
@@ -2091,7 +2402,7 @@
 
     // Toi et chacun : à quel point vous votez pareil, et les votes dans les deux sens.
     const rows = others
-      .map((u) => ({ u, agree: agreeOf(u), sim: row[u.id].sim, out: row[u.id].given, back: aff.pairs[u.id][pid].given }))
+      .map((u) => ({ u, agree: agreeOf(u), sim: row[u.id].sim, out: row[u.id].given, back: voters.includes(u) || (u.claimed && aff.pairs[u.id][pid].given) ? aff.pairs[u.id][pid].given : null }))
       .sort((a, b) => (b.agree ?? -1) - (a.agree ?? -1));
     const table = `
       <div class="section-title">${you ? T('Toi et chacun', 'You and everyone') : T(`${name} et chacun`, `${name} and everyone`)}</div>
@@ -2102,7 +2413,7 @@
             <span class="dt-who">${avatar(r.u, 'xs')}<span>${esc(r.u.name)}</span></span>
             <span class="dt-bar">${r.agree == null ? '<i class="muted">–</i>' : `<span class="dt-track"><span style="width:${r.agree}%"></span></span><b>${r.agree}%</b>`}</span>
             <span class="dt-bar">${r.sim == null ? '<i class="muted">–</i>' : `<span class="dt-track sim"><span style="width:${r.sim}%"></span></span><b>${r.sim}%</b>`}</span>
-            <span class="dt-io">${num(r.out)}·${num(r.back)}</span>
+            <span class="dt-io">${num(r.out)}·${r.back == null ? '–' : num(r.back)}</span>
           </button>`).join('')}
         <p class="muted small dt-help">${T('« Votent pareil » : vous avez voté pour la même personne. « Votés pareil » : on vote pour vous deux sur les mêmes questions.', '“Vote alike”: you voted for the same person. “Voted alike”: people vote for you both on the same questions.')}</p>
       </div>`;
@@ -2112,6 +2423,18 @@
       <div class="duo-grid">${tiles}</div>
       ${flockLine}
       ${table}`;
+  }
+
+  function streakSection() {
+    const st = state.streaks;
+    if (!st) return '';
+    const rows = state.players.filter((u) => u.claimed && st.players[u.id]).map((u) => ({ u, ...st.players[u.id] }))
+      .sort((a, b) => b.current - a.current || b.best - a.best).slice(0, 6);
+    return `
+      <button class="card streak-card" id="streakCard">
+        <span class="sk-top"><span>🔥 <b>${st.group.current}</b> ${T(`jour${st.group.current > 1 ? 's' : ''} d’affilée où tout le monde a voté`, `day${st.group.current === 1 ? '' : 's'} in a row where everyone voted`)}</span><small class="muted">${T('record', 'best')} ${st.group.best}</small></span>
+        <span class="streak-mini">${rows.map((r) => `<span class="${r.today === false ? 'off' : ''}">${avatar(r.u, 'xs')}${r.current}</span>`).join('')}</span>
+      </button>`;
   }
 
   // Stats du groupe : notes des questions, moments mémorables, chiffres en vrac.
@@ -2134,7 +2457,9 @@
     const generous = raters[0];
     const harsh = raters.length > 1 ? raters[raters.length - 1] : null;
     return `
+      ${recapCards()}
       <div class="num-tiles">${tiles.map(([n, l]) => `<div class="num-tile"><b>${n}</b><span>${l}</span></div>`).join('')}</div>
+      ${streakSection()}
 
       <div class="section-title">${T('Les questions préférées', 'Favourite questions')} ${r.questions ? `<span class="count">${r.count} ${T('notes', 'ratings')}</span>` : ''}</div>
       ${r.top.length ? `<div class="card qlist">${qList(r.top)}</div>` : `<div class="card empty" style="padding:18px">${T('Notez les questions (les étoiles sous les résultats) : les préférées du groupe apparaîtront ici.', 'Rate the questions (the stars under the results): the group’s favourites will show up here.')}</div>`}
@@ -2152,6 +2477,477 @@
         <div class="qrow"><span>${esc(qText(u))}</span><span class="moment-who">👑 ${avatar(player(u.target), 'xs')}<small>${u.n}/${u.n}</small></span></div>`).join('')}</div>` : ''}
       ${gs.split.length ? `<div class="card qlist moments">${gs.split.map((u) => `
         <div class="qrow"><span>${esc(qText(u))}</span><span class="moment-who">🌪️<small>${T(`${u.n} avis`, `${u.n} answers`)}</small></span></div>`).join('')}</div>` : ''}`;
+  }
+
+  // ---------- Séries (🔥) ----------
+  // Un jour compte si on vote au moins une fois ; pour le groupe, si tout le monde a voté. Les jours sans question
+  // ne cassent rien, et aujourd'hui n'est jamais raté avant minuit.
+  function myStreak() {
+    const s = state.streaks && state.streaks.players[state.me.playerId];
+    return s || { current: 0, best: 0, today: null };
+  }
+
+  function streakChip() {
+    const s = myStreak();
+    const pending = s.today === false; // pas encore voté aujourd'hui
+    return `<span class="sc-fire ${pending ? 'off' : ''}">🔥</span><b>${s.current}</b>`;
+  }
+
+  function openStreakSheet() {
+    const st = state.streaks;
+    const s = myStreak();
+    const g = st.group;
+    const rows = state.players
+      .filter((u) => u.claimed && st.players[u.id])
+      .map((u) => ({ u, ...st.players[u.id] }))
+      .sort((a, b) => b.current - a.current || b.best - a.best);
+    openSheet(`
+      <div class="sheet-head"><h2>${T('Séries', 'Streaks')} 🔥</h2><button class="x" data-close>✕</button></div>
+      <div class="streak-duo">
+        <div class="streak-big ${s.today === false ? 'pending' : ''}">
+          <span class="sb-n">🔥 ${s.current}</span>
+          <span class="sb-l">${T('ta série', 'your streak')}</span>
+          <span class="sb-s">${s.today === false ? T('vote aujourd’hui pour la garder', 'vote today to keep it') : s.today ? T('✓ fait aujourd’hui', '✓ done today') : ''}${s.best ? ` · ${T('record', 'best')} ${s.best}` : ''}</span>
+        </div>
+        <div class="streak-big group ${g.today === false ? 'pending' : ''}">
+          <span class="sb-n">🔥 ${g.current}</span>
+          <span class="sb-l">${T('série du groupe', 'group streak')}</span>
+          <span class="sb-s">${g.today === false && g.missing.length ? T('il manque : ', 'waiting for: ') + g.missing.map((id) => esc(player(id).name)).join(', ') : g.today ? T('✓ tout le monde a voté', '✓ everyone voted') : ''}${g.best ? ` · ${T('record', 'best')} ${g.best}` : ''}</span>
+        </div>
+      </div>
+      <p class="muted small">${T('Un jour compte si tu votes au moins une fois. Pour le groupe, il faut que tout le monde vote. Les jours sans question ne cassent rien.', 'A day counts if you vote at least once. For the group, everyone has to vote. Days without questions don’t break anything.')}</p>
+      <div class="card qlist streak-list">${rows.map((r) => `
+        <div class="qrow">${avatar(r.u, 'sm')}<span class="name">${esc(r.u.name)}</span><span class="st-cur ${r.today === false ? 'off' : ''}">🔥 ${r.current}</span><span class="muted small st-best">${T('record', 'best')} ${r.best}</span></div>`).join('')}
+      </div>`, () => {});
+  }
+
+  // ---------- Quiz : questionnaire de profil (si l'admin l'a activé) ----------
+  let quizData = null; // { items, mine, summary, effects }
+  const TAG_LABELS = {
+    alcool: ['l’alcool', 'drinking'], soiree: ['les soirées', 'nights out'], couple: ['le couple', 'relationships'],
+    celib: ['la vie de célib', 'single life'], etudes: ['les études', 'studying'], travail: ['le boulot', 'work'],
+    gaming: ['les jeux vidéo', 'gaming'], sport: ['le sport', 'sport'], voiture: ['la conduite', 'driving'],
+    coloc: ['la coloc', 'flatshares'], parents: ['vivre chez ses parents', 'living with your parents'], enfants: ['les enfants', 'kids'],
+    homme: ['les mecs', 'guys'], femme: ['les filles', 'girls'], jeune: ['les plus jeunes', 'the youngest'], adulte: ['les plus âgés', 'the oldest'],
+    mixte: ['les groupes mixtes', 'mixed groups'],
+  };
+
+  async function renderQuiz(view) {
+    if (!state.settings.profiles) { tab = 'live'; return renderView(); }
+    if (!quizData || quizData.group !== groupId) {
+      view.innerHTML = `<div class="card empty">${T('Chargement…', 'Loading…')}</div>`;
+      try {
+        quizData = { ...(await api('GET', 'quiz')), group: groupId };
+      } catch (e) {
+        view.innerHTML = `<div class="card empty">${esc(e.message)}</div>`;
+        return;
+      }
+      if (tab !== 'quiz') return;
+    }
+    const q = quizData;
+    const lab = (x) => (L ? x.en : x.fr);
+    const sum = q.summary;
+    const more = Object.entries(q.effects || {}).filter(([, v]) => v >= 0.8).map(([t]) => TAG_LABELS[t] && TAG_LABELS[t][L ? 1 : 0]).filter(Boolean);
+    const less = Object.entries(q.effects || {}).filter(([, v]) => v <= 0.4).map(([t]) => TAG_LABELS[t] && TAG_LABELS[t][L ? 1 : 0]).filter(Boolean);
+    view.innerHTML = `
+      <div class="card quiz-intro">
+        <div class="card-title">${T('Qui êtes-vous ?', 'Who are you lot?')}</div>
+        <p class="muted small">${T('Quelques questions sur toi, pour que les questions du jeu collent mieux au groupe (et qu’on évite celles qui ne vous parlent pas). <b>Personne ne voit tes réponses</b> : seulement le résumé du groupe, à partir de 3 réponses. Tout est facultatif, et tu peux changer quand tu veux.', 'A few questions about you, so the game’s questions fit the group better (and the ones that don’t speak to you show up less). <b>Nobody sees your answers</b>: only the group summary, from 3 answers on. Everything is optional, and you can change it anytime.')}</p>
+      </div>
+      ${q.items.map((item) => `
+        <div class="card quiz-item">
+          <div class="qi-label">${esc(lab(item))}</div>
+          <div class="qi-opts">${item.options.map((o) => `<button class="chip ${q.mine[item.key] === o.key ? 'on' : ''}" data-qk="${item.key}" data-qv="${o.key}">${esc(lab(o))}</button>`).join('')}</div>
+          ${sum.items[item.key] ? quizBar(item, sum.items[item.key], lab) : ''}
+        </div>`).join('')}
+      <div class="card">
+        <div class="card-title">${T('Le groupe', 'The group')} <span class="muted small">· ${T(`${sum.answered}/${sum.members} ont répondu`, `${sum.answered}/${sum.members} answered`)}</span></div>
+        ${sum.answered < 3 ? `<p class="muted small" style="margin:0">${T('Le résumé du groupe apparaît à partir de 3 réponses (pour que personne ne soit reconnu).', 'The group summary shows up from 3 answers (so nobody can be recognised).')}</p>` : ''}
+        ${more.length ? `<p class="small" style="margin:6px 0 0">⬆️ ${T('Plus souvent : ', 'More often: ')}${more.map(esc).join(', ')}</p>` : ''}
+        ${less.length ? `<p class="small" style="margin:6px 0 0">⬇️ ${T('Moins souvent : ', 'Less often: ')}${less.map(esc).join(', ')}</p>` : ''}
+        ${!more.length && !less.length ? `<p class="muted small" style="margin:6px 0 0">${T('Pas encore assez de réponses pour changer les questions.', 'Not enough answers yet to change the questions.')}</p>` : ''}
+      </div>`;
+    view.querySelectorAll('[data-qk]').forEach((b) => (b.onclick = async () => {
+      const k = b.dataset.qk;
+      const v = b.dataset.qv;
+      const mine = { ...q.mine };
+      if (mine[k] === v) delete mine[k]; // un 2e tap = « je préfère ne pas dire »
+      else mine[k] = v;
+      q.mine = mine;
+      view.querySelectorAll(`[data-qk="${k}"]`).forEach((x) => x.classList.toggle('on', mine[k] === x.dataset.qv));
+      try {
+        const r = await api('PUT', 'quiz', { answers: mine });
+        Object.assign(q, r);
+        state.me.quizDone = Object.keys(r.mine).length > 0;
+        renderNav();
+        clearTimeout(renderQuiz.t);
+        renderQuiz.t = setTimeout(() => { if (tab === 'quiz') { const y = window.scrollY; renderView(); window.scrollTo({ top: y }); } }, 900);
+      } catch (e) { toast(e.message); }
+    }));
+  }
+
+  function quizBar(item, counts, lab) {
+    const total = Object.values(counts).reduce((a, b) => a + b, 0);
+    if (!total) return '';
+    const colors = ['#7b2ff7', '#ff2e88', '#ff7a00', '#00a8e8', '#12b76a'];
+    return `<div class="qi-bar">${item.options.map((o, i) => (counts[o.key] ? `<span style="flex:${counts[o.key]};background:${colors[i % colors.length]}" title="${esc(lab(o))}"></span>` : '')).join('')}</div>
+      <div class="qi-legend">${item.options.filter((o) => counts[o.key]).map((o) => `<span><i style="background:${colors[item.options.indexOf(o) % colors.length]}"></i>${esc(lab(o))} ${Math.round((counts[o.key] / total) * 100)}%</span>`).join('')}</div>`;
+  }
+
+  // ---------- Récap du mois (façon « Wrapped ») ----------
+  const monthName = (m) => new Date(`${m}-15T12:00:00Z`).toLocaleDateString(LOC, { month: 'long', timeZone: 'UTC' });
+  const monthTitle = (m, partial) => (partial ? T(`${monthName(m)} (en cours)`, `${monthName(m)} (so far)`) : monthName(m));
+
+  function recapCards() {
+    const list = (state.recaps || []).slice(0, 4);
+    if (!list.length) return '';
+    return `<div class="recap-list">${list.map((r, i) => `
+      <button class="recap-card ${i === 0 ? 'first' : ''}" data-recap="${r.month}">
+        <span class="rc-emoji">${r.partial ? '📅' : '🎁'}</span>
+        <span class="rc-text"><b>${T('Récap de ', 'Recap: ')}${esc(monthTitle(r.month, r.partial))}</b><small>${r.partial ? T('Le mois jusqu’ici', 'The month so far') : T('Ton mois et celui du groupe', 'Your month and the group’s')}</small></span>
+        ${icon('down', 'rc-go')}
+      </button>`).join('')}</div>`;
+  }
+
+  // Bandeau dans Live la première semaine du mois : le récap du mois dernier est prêt.
+  function recapBanner() {
+    const last = (state.recaps || []).find((r) => !r.partial);
+    if (!last || load('recapSeen_' + groupId) === last.month) return '';
+    const d = new Date(now());
+    const prev = new Date(d.getFullYear(), d.getMonth() - 1, 15);
+    const prevKey = `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, '0')}`;
+    if (last.month !== prevKey || d.getDate() > 10) return '';
+    return `<button class="recap-banner" data-recap="${last.month}">🎁 <span>${T(`Ton récap de <b>${esc(monthName(last.month))}</b> est prêt`, `Your <b>${esc(monthName(last.month))}</b> recap is ready`)}</span>${icon('down', 'rc-go')}</button>`;
+  }
+
+  function openRecapFromLink() {
+    if (!state || !pendingRecap) return;
+    const m = pendingRecap;
+    pendingRecap = null;
+    openRecap(m);
+  }
+
+  const storyOpen = () => !!document.getElementById('story');
+  function closeStory() {
+    const s = document.getElementById('story');
+    if (s) s.remove();
+    document.body.classList.remove('noscroll');
+  }
+
+  async function openRecap(month) {
+    let r;
+    try {
+      r = await api('GET', 'recap?month=' + encodeURIComponent(month));
+    } catch (e) {
+      return toast(e.message);
+    }
+    save('recapSeen_' + groupId, month);
+    const slides = recapSlides(r);
+    if (!slides.length) return toast(T('Pas assez de questions ce mois-là pour un récap.', 'Not enough questions that month for a recap.'));
+    closeStory();
+    const el = document.createElement('div');
+    el.id = 'story';
+    el.className = 'story';
+    document.body.appendChild(el);
+    document.body.classList.add('noscroll');
+    let i = 0;
+    const draw = () => {
+      const s = slides[i];
+      el.style.setProperty('--sg', s.bg);
+      el.innerHTML = `
+        <div class="story-bars">${slides.map((_, j) => `<span class="${j < i ? 'done' : j === i ? 'on' : ''}"></span>`).join('')}</div>
+        <div class="story-top"><span>${esc(state.group.name)} · ${esc(monthTitle(r.month, r.partial))}</span><button class="x" id="storyX" aria-label="${T('Fermer', 'Close')}">✕</button></div>
+        <div class="story-slide" key="${i}">${s.html}</div>
+        <div class="story-hint">${i < slides.length - 1 ? T('Touche pour continuer', 'Tap to continue') : T('Touche pour fermer', 'Tap to close')}</div>`;
+      el.querySelector('#storyX').onclick = (e) => { e.stopPropagation(); history.state && history.state.guard ? history.back() : closeStory(); };
+    };
+    el.onclick = (e) => {
+      const back = e.clientX < window.innerWidth * 0.3;
+      if (back) { if (i > 0) { i--; draw(); } return; }
+      if (i < slides.length - 1) { i++; draw(); } else if (history.state && history.state.guard) history.back(); else closeStory();
+    };
+    draw();
+    syncGuard();
+  }
+
+  function recapSlides(r) {
+    const G = r.group;
+    const M = r.me;
+    const p = (id) => player(id);
+    const big = (u) => `<div class="st-av">${avatar(u, 'xl')}</div>`;
+    const name = (u) => esc(u.id === state.me.playerId ? T('Toi', 'You') : u.name);
+    const q = (x) => `<p class="st-q">« ${esc(qText(x))} »</p>`;
+    const statDef = M.topStat && state.statDefs.find((d) => d.key === M.topStat);
+    const out = [];
+    const add = (bg, html) => out.push({ bg, html });
+    if (!G.polls) return out;
+    add('linear-gradient(160deg,#7b2ff7,#f107a3)', `
+      <div class="st-emoji">🎁</div>
+      <h2>${T('Ton mois dans', 'Your month in')}<br><b>${esc(state.group.name)}</b></h2>
+      <p class="st-big">${G.polls}</p><p>${T('questions', 'questions')} · ${G.votes} ${T('votes', 'votes')}</p>
+      ${r.partial ? `<p class="st-small">${T('Le mois n’est pas fini : tout peut encore changer.', 'The month isn’t over: anything can still change.')}</p>` : ''}`);
+    add('linear-gradient(160deg,#ff7a00,#f107a3)', `
+      <div class="st-emoji">🗳️</div>
+      <h2>${T('Participation', 'Turnout')}</h2>
+      <p class="st-big">${G.participation}%</p>
+      <p>${T('des votes possibles ont été faits', 'of possible votes were cast')}</p>
+      ${G.streak >= 2 ? `<p class="st-pill">🔥 ${T(`${G.streak} jours d’affilée où tout le monde a voté`, `${G.streak} days in a row where everyone voted`)}</p>` : ''}`);
+    if (G.mvp.length) {
+      const [id, n] = G.mvp[0];
+      add('linear-gradient(160deg,#3a5bff,#7b2ff7)', `
+        <div class="st-emoji">👑</div>
+        <h2>${T('La star du mois', 'Star of the month')}</h2>
+        ${big(p(id))}
+        <p class="st-name">${name(p(id))}</p>
+        <p>${T(`en tête sur ${n} question${n > 1 ? 's' : ''}`, `top of ${n} question${n > 1 ? 's' : ''}`)}</p>
+        ${G.mvp.length > 1 ? `<p class="st-small">${G.mvp.slice(1).map(([x, c]) => `${name(p(x))} (${c})`).join(' · ')}</p>` : ''}`);
+    }
+    if (G.unanimousCount) {
+      add('linear-gradient(160deg,#ffbe0b,#ff7a00)', `
+        <div class="st-emoji">🤝</div>
+        <h2>${T(`${G.unanimousCount} unanimité${G.unanimousCount > 1 ? 's' : ''}`, `${G.unanimousCount} unanimous vote${G.unanimousCount > 1 ? 's' : ''}`)}</h2>
+        <div class="st-list">${G.unanimous.slice(0, 3).map((u) => `<div class="st-li">${avatar(p(u.target), 'sm')}<span>${esc(qText(u))}</span></div>`).join('')}</div>
+        ${G.split ? `<p class="st-small">🌪️ ${T(`Et ${G.split} fois, personne n’était d’accord.`, `And ${G.split} times, nobody agreed.`)}</p>` : ''}`);
+    }
+    if (G.bestQuestion) {
+      add('linear-gradient(160deg,#12b76a,#00a8e8)', `
+        <div class="st-emoji">⭐</div>
+        <h2>${T('La question préférée', 'Favourite question')}</h2>
+        ${q(G.bestQuestion)}
+        <p>${String(G.bestQuestion.avg).replace('.', L ? '.' : ',')}/5 · ${G.bestQuestion.n} ${T('notes', 'ratings')}</p>
+        ${G.worstQuestion && G.worstQuestion.avg < G.bestQuestion.avg ? `<p class="st-small">${T('Le flop', 'The flop')} : « ${esc(qText(G.worstQuestion))} » (${String(G.worstQuestion.avg).replace('.', L ? '.' : ',')}/5)</p>` : ''}`);
+    }
+    if (G.messages) {
+      const top = G.topChatter[0];
+      add('linear-gradient(160deg,#00b8a9,#3a5bff)', `
+        <div class="st-emoji">💬</div>
+        <h2>${G.messages} ${T('messages', 'messages')}</h2>
+        ${top ? `${big(p(top[0]))}<p class="st-name">${name(p(top[0]))}</p><p>${T(`le/la plus bavard·e : ${top[1]} messages`, `the chattiest: ${top[1]} messages`)}</p>` : ''}
+        ${G.bestMsg ? `<div class="st-msg"><b>${esc(p(G.bestMsg.playerId).name)}</b> ${G.bestMsg.text ? esc(G.bestMsg.text) : G.bestMsg.kind === 'gif' ? 'GIF' : '📷'}<span>${G.bestMsg.emojis.join('')} ${G.bestMsg.reactions}</span></div><p class="st-small">${T('le message le plus réagi', 'the most reacted message')}</p>` : ''}`);
+    }
+    const fun = [];
+    if (G.nightOwl) fun.push(`<div class="st-li">${avatar(p(G.nightOwl[0]), 'sm')}<span>🦉 <b>${name(p(G.nightOwl[0]))}</b> · ${T('le plus actif entre minuit et 5 h', 'most active between midnight and 5am')}</span></div>`);
+    if (G.fastest) fun.push(`<div class="st-li">${avatar(p(G.fastest[0]), 'sm')}<span>⚡ <b>${name(p(G.fastest[0]))}</b> · ${T(`vote en ${durTxt(G.fastest[1])} en moyenne`, `votes within ${durTxt(G.fastest[1])} on average`)}</span></div>`);
+    if (G.slowest) fun.push(`<div class="st-li">${avatar(p(G.slowest[0]), 'sm')}<span>🐢 <b>${name(p(G.slowest[0]))}</b> · ${T(`prend son temps : ${durTxt(G.slowest[1])}`, `takes their time: ${durTxt(G.slowest[1])}`)}</span></div>`);
+    if (G.bestCustom) fun.push(`<div class="st-li">${avatar(p(G.bestCustom.author), 'sm')}<span>✍️ ${T('Meilleure question perso', 'Best own question')} : « ${esc(qText(G.bestCustom))} »</span></div>`);
+    if (fun.length) add('linear-gradient(160deg,#5a189a,#c21fd6)', `<div class="st-emoji">🏅</div><h2>${T('Mentions spéciales', 'Special mentions')}</h2><div class="st-list">${fun.join('')}</div>`);
+    // --- Toi ---
+    if (M.voted) {
+      add('linear-gradient(160deg,#f107a3,#ff7a00)', `
+        <div class="st-emoji">🫵</div>
+        <h2>${T('Et toi ?', 'And you?')}</h2>
+        <p class="st-big">${M.wins}</p>
+        <p>${T(`question${M.wins > 1 ? 's' : ''} où tu étais en tête`, `question${M.wins === 1 ? '' : 's'} where you came top`)}${M.winRank ? T(` · ${M.winRank}e du groupe`, ` · #${M.winRank} in the group`) : ''}</p>
+        ${M.winList.length ? `<div class="st-list">${M.winList.slice(0, 4).map((w) => `<div class="st-li"><span>« ${esc(qText(w))} »</span></div>`).join('')}</div>` : ''}
+        ${M.unanimous.length ? `<p class="st-pill">👑 ${T(`${M.unanimous.length} unanimité${M.unanimous.length > 1 ? 's' : ''} sur toi`, `${M.unanimous.length} unanimous vote${M.unanimous.length > 1 ? 's' : ''} on you`)}</p>` : ''}`);
+      const duo = [];
+      if (M.fan) duo.push(`<div class="st-li">${avatar(p(M.fan[0]), 'sm')}<span>💘 <b>${name(p(M.fan[0]))}</b> · ${T(`ton plus grand fan (${num(M.fan[1])} votes pour toi)`, `your biggest fan (${num(M.fan[1])} votes for you)`)}</span></div>`);
+      if (M.target) duo.push(`<div class="st-li">${avatar(p(M.target[0]), 'sm')}<span>🎯 <b>${name(p(M.target[0]))}</b> · ${T(`ta cible préférée (${num(M.target[1])} votes)`, `your favourite target (${num(M.target[1])} votes)`)}</span></div>`);
+      if (M.twin) duo.push(`<div class="st-li">${avatar(p(M.twin[0]), 'sm')}<span>👯 <b>${name(p(M.twin[0]))}</b> · ${T(`même vote que toi ${M.twin[1]} % du temps`, `same vote as you ${M.twin[1]}% of the time`)}</span></div>`);
+      if (M.selfVotes) duo.push(`<div class="st-li"><span>🪞 ${T(`${num(M.selfVotes)} vote${M.selfVotes > 1 ? 's' : ''} pour toi-même`, `${num(M.selfVotes)} vote${M.selfVotes > 1 ? 's' : ''} for yourself`)}</span></div>`);
+      if (duo.length) add('linear-gradient(160deg,#ff2e88,#7b2ff7)', `<div class="st-emoji">💞</div><h2>${T('Tes affinités du mois', 'Your month’s connections')}</h2><div class="st-list">${duo.join('')}</div>`);
+      add('linear-gradient(160deg,#1d3557,#3a5bff)', `
+        <div class="st-emoji">${statDef ? statDef.emoji : '✨'}</div>
+        <h2>${T('Ton mois en un mot', 'Your month in a word')}</h2>
+        <p class="st-big st-word">${statDef ? esc(statLabel(statDef)) : '—'}</p>
+        <div class="st-facts">
+          <span><b>${M.voted}/${G.polls}</b>${T('votes', 'votes')}</span>
+          <span><b>🔥 ${M.streak}</b>${T('meilleure série', 'best streak')}</span>
+          <span><b>${M.messages}</b>${T('messages', 'messages')}</span>
+          <span><b>${M.reactions}</b>${T('réactions reçues', 'reactions got')}</span>
+        </div>
+        ${M.speed != null ? `<p class="st-small">${T(`Tu votes en ${durTxt(M.speed)} en moyenne`, `You vote within ${durTxt(M.speed)} on average`)}</p>` : ''}`);
+    }
+    add('linear-gradient(160deg,#7b2ff7,#00a8e8)', `<div class="st-emoji">👋</div><h2>${r.partial ? T('Rendez-vous à la fin du mois', 'See you at the end of the month') : T('Au mois prochain !', 'See you next month!')}</h2><p>${T('Fais une capture pour la partager au groupe 📸', 'Take a screenshot to share it with the group 📸')}</p>`);
+    return out;
+  }
+
+  // 95 → « 1 h 35 », 12 → « 12 min ».
+  function durTxt(min) {
+    const m = Math.round(min);
+    if (m < 60) return `${m} min`;
+    const h = Math.floor(m / 60);
+    return h < 48 ? `${h} h${m % 60 ? ' ' + String(m % 60).padStart(2, '0') : ''}` : T(`${Math.round(h / 24)} j`, `${Math.round(h / 24)} days`);
+  }
+
+  // ---------- Glisser pour changer d'onglet ----------
+  // Sur l'écran principal, glisser à gauche / à droite passe à la page voisine : les sous-onglets d'abord
+  // (En cours ↔ Archives, Profil ↔ Affinités ↔ Groupe), puis les onglets du menu.
+  function pages() {
+    const list = [['live', 'live'], ['live', 'archive'], ['chat'], ['sets'], ['stats', 'me'], ['stats', 'duo'], ['stats', 'group']];
+    if (state.settings.profiles) list.push(['quiz']);
+    list.push(['me']);
+    return list;
+  }
+  function pageIndex() {
+    const sub = tab === 'live' ? liveMode : tab === 'stats' ? statsMode : undefined;
+    return pages().findIndex(([t, m]) => t === tab && (m === undefined || m === sub));
+  }
+  function goPage(i) {
+    const [t, m] = pages()[i];
+    if (t === 'live') { liveMode = m; save('liveMode', m); }
+    if (t === 'stats') { statsMode = m; save('statsMode', m); }
+    if (t === 'sets') openSet = null;
+    if (t === tab) { openPolls.clear(); renderView(); window.scrollTo({ top: 0 }); } else go(t);
+  }
+
+  (function setupSwipe() {
+    let s = null;
+    const blocked = (el) => {
+      for (let n = el; n && n !== document.body; n = n.parentElement) {
+        if (n.matches && n.matches('input, textarea, select, [data-noswipe], .crop-box')) return true;
+        if (n.scrollWidth > n.clientWidth + 4) {
+          const ox = getComputedStyle(n).overflowX;
+          if (ox === 'auto' || ox === 'scroll') return true;
+        }
+      }
+      return false;
+    };
+    document.addEventListener('touchstart', (e) => {
+      s = null;
+      const view = document.getElementById('view');
+      if (!state || !view || e.touches.length !== 1 || !view.contains(e.target) || !$sheet.hidden || chatOpen || storyOpen() || viewerOpen() || animating) return;
+      const t = e.touches[0];
+      if (t.clientX < 24 || t.clientX > window.innerWidth - 12 || blocked(e.target)) return;
+      s = { x: t.clientX, y: t.clientY, t: Date.now(), dir: null, dx: 0, view };
+    }, { passive: true });
+    document.addEventListener('touchmove', (e) => {
+      if (!s) return;
+      const t = e.touches[0];
+      const dx = t.clientX - s.x;
+      const dy = t.clientY - s.y;
+      if (!s.dir) {
+        if (Math.abs(dy) > 12 && Math.abs(dy) > Math.abs(dx)) { s = null; return; }
+        if (Math.abs(dx) > 14 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+          if (!e.cancelable) { s = null; return; }
+          s.dir = 'x';
+          s.i = pageIndex();
+          s.view.style.transition = 'none';
+        } else return;
+      }
+      e.preventDefault();
+      s.dx = dx;
+      const can = s.i >= 0 && (dx < 0 ? s.i < pages().length - 1 : s.i > 0);
+      const move = can ? dx : dx * 0.25;
+      s.view.style.transform = `translateX(${move}px)`;
+      s.view.style.opacity = String(1 - Math.min(0.35, Math.abs(move) / window.innerWidth));
+    }, { passive: false });
+    const end = () => {
+      if (!s || s.dir !== 'x') { s = null; return; }
+      const { view, dx, i } = s;
+      const v = Math.abs(dx) / Math.max(1, Date.now() - s.t);
+      s = null;
+      const dir = dx < 0 ? 1 : -1;
+      const target = i + dir;
+      const commit = i >= 0 && target >= 0 && target < pages().length && (Math.abs(dx) > window.innerWidth * 0.22 || (v > 0.45 && Math.abs(dx) > 40));
+      view.style.transition = 'transform 0.16s ease-out, opacity 0.16s ease-out';
+      if (!commit) {
+        view.style.transform = '';
+        view.style.opacity = '';
+        return;
+      }
+      view.style.transform = `translateX(${-dir * window.innerWidth * 0.5}px)`;
+      view.style.opacity = '0';
+      setTimeout(() => {
+        view.style.transition = 'none';
+        view.style.transform = `translateX(${dir * window.innerWidth * 0.3}px)`;
+        goPage(target);
+        const fresh = document.getElementById('view');
+        if (!fresh) return;
+        fresh.style.transition = 'none';
+        fresh.style.transform = `translateX(${dir * window.innerWidth * 0.3}px)`;
+        fresh.style.opacity = '0';
+        fresh.offsetHeight; // force le calcul avant l'animation
+        fresh.style.transition = 'transform 0.2s ease-out, opacity 0.2s ease-out';
+        fresh.style.transform = '';
+        fresh.style.opacity = '';
+      }, 150);
+    };
+    document.addEventListener('touchend', end);
+    document.addEventListener('touchcancel', end);
+  })();
+
+  // ---------- Nouveautés & avis ----------
+  // Deux petits liens discrets en bas de Moi (et de l'accueil). Une pastille rose quand il y a du nouveau.
+  let releases = null;
+  const latestNews = () => (state && state.latestNews) || (account && account.latestNews) || null;
+  const newsUnseen = () => !!latestNews() && load('newsSeen') !== latestNews();
+
+  function aboutLinks() {
+    return `
+      <div class="about-links">
+        <button class="link-btn" data-news>✨ ${T('Nouveautés', 'What’s new')}${newsUnseen() ? '<span class="dot-new"></span>' : ''}</button>
+        <button class="link-btn" data-feedback>💬 ${T('Un bug ? Un avis ?', 'Bug? Feedback?')}</button>
+      </div>`;
+  }
+  function bindAbout(root) {
+    root.querySelectorAll('[data-news]').forEach((b) => (b.onclick = () => openNews()));
+    root.querySelectorAll('[data-feedback]').forEach((b) => (b.onclick = () => openFeedback()));
+  }
+
+  async function openNews() {
+    if (!releases) {
+      try {
+        releases = (await api('GET', 'changelog')).releases;
+      } catch (e) { return toast(e.message); }
+    }
+    const seen = load('newsSeen');
+    const seenIdx = releases.findIndex((r) => r.id === seen);
+    save('newsSeen', releases[0] && releases[0].id);
+    document.querySelectorAll('[data-news] .dot-new').forEach((d) => d.remove());
+    const fmt = (d) => new Date(d + 'T12:00:00Z').toLocaleDateString(LOC, { day: 'numeric', month: 'long', timeZone: 'UTC' });
+    openSheet(`
+      <div class="sheet-head"><h2>✨ ${T('Nouveautés', 'What’s new')}</h2><button class="x" data-close>✕</button></div>
+      ${releases.map((r, i) => `
+        <div class="patch ${seenIdx < 0 ? (i === 0 ? 'new' : '') : i < seenIdx ? 'new' : ''}">
+          <div class="patch-head"><b>${esc(r.title[L ? 'en' : 'fr'])}</b><span class="muted small">${fmt(r.date)}</span></div>
+          <ul>${(L ? r.en : r.fr).map((l) => `<li>${esc(l)}</li>`).join('')}</ul>
+        </div>`).join('')}
+      <button class="btn btn-soft btn-block" id="newsFb" style="margin-top:12px">💬 ${T('Un bug ? Une idée ? Dis-le nous', 'A bug? An idea? Tell us')}</button>`, (root) => {
+      root.querySelector('#newsFb').onclick = () => openFeedback();
+    });
+  }
+
+  function openFeedback(showReceived) {
+    let kind = load('fbKind') || 'bug';
+    let text = load('fbDraft') || '';
+    const owner = !!(account && account.account && account.account.owner);
+    const draw = () => openSheet(`
+      <div class="sheet-head"><h2>💬 ${T('Un bug ? Un avis ?', 'Bug? Feedback?')}</h2><button class="x" data-close>✕</button></div>
+      <p class="muted small" style="margin:0 0 10px">${T('Ça part directement au développeur. Dis ce que tu faisais, ce qui s’est passé, et sur quel téléphone si c’est un bug.', 'It goes straight to the developer. Say what you were doing, what happened, and which phone if it’s a bug.')}</p>
+      <div class="fb-kinds">
+        ${[['bug', T('🐞 Bug', '🐞 Bug')], ['idea', T('💡 Idée', '💡 Idea')], ['other', T('💬 Autre', '💬 Other')]].map(([k, l]) => `<button class="chip ${kind === k ? 'on' : ''}" data-kind="${k}">${l}</button>`).join('')}
+      </div>
+      <textarea class="input" id="fbText" maxlength="2000" placeholder="${kind === 'bug' ? T('Ex : quand je touche…, l’app…', 'e.g. when I tap…, the app…') : T('Ton idée, ton avis…', 'Your idea, your thoughts…')}">${esc(text)}</textarea>
+      <button class="btn btn-main btn-block" id="fbGo">${T('Envoyer', 'Send')}</button>
+      ${owner ? `<button class="btn btn-soft btn-block" id="fbList" style="margin-top:10px">${T('Voir les avis reçus', 'See feedback received')}</button><div id="fbItems"></div>` : ''}`, (root) => {
+      const area = root.querySelector('#fbText');
+      area.oninput = () => { text = area.value; save('fbDraft', text || null); };
+      root.querySelectorAll('[data-kind]').forEach((b) => (b.onclick = () => { text = area.value; kind = b.dataset.kind; save('fbKind', kind); draw(); }));
+      action(root.querySelector('#fbGo'), async () => {
+        await api('POST', 'feedback', { kind, text: area.value, groupId: groupId || undefined });
+        save('fbDraft', null);
+        closeSheet();
+        toast(T('Merci ! C’est envoyé 🙏', 'Thanks! Sent 🙏'));
+      });
+      const showList = async () => {
+        const { items } = await api('GET', 'feedback');
+        const box = root.querySelector('#fbItems');
+        if (!box) return;
+        box.innerHTML = items.length ? `<div class="card qlist fb-list" style="margin-top:12px">${items.map((x) => `
+          <div class="qrow"><b>${{ bug: '🐞', idea: '💡', other: '💬' }[x.kind] || '💬'} ${esc(x.name || x.username || '?')}${x.group ? ` · ${esc(x.group)}` : ''}</b><span>${esc(x.text)}</span><span class="muted small">${ago(x.at)} · ${esc(x.version || '')} · ${esc((x.ua.match(/\(([^)]*)\)/) || [])[1] || '')}</span></div>`).join('')}</div>` : `<p class="muted small">${T('Rien pour l’instant.', 'Nothing yet.')}</p>`;
+      };
+      const lb = root.querySelector('#fbList');
+      if (lb) action(lb, showList);
+      if (showReceived && owner) showList().catch((e) => toast(e.message));
+    });
+    draw();
+  }
+
+  // Liens des notifications : ?news=1 (nouvelle version), ?feedback=1 (avis reçu, pour le développeur).
+  function openPendingAbout() {
+    if (pendingNews) { pendingNews = false; openNews(); }
+    else if (pendingFeedback) { pendingFeedback = false; openFeedback(true); }
   }
 
   // ---------- Moi & admin ----------
@@ -2213,6 +3009,8 @@
             ['votes', T('Quand quelqu’un vote', 'When someone votes')],
             ['chat', T('Messages', 'Messages')],
             ['mentions', T('Quand on te tague ou te répond', 'When someone tags you or replies to you'), T('Même si les messages sont coupés', 'Even if messages are off')],
+            ['streaks', T('Rappel de série 🔥', 'Streak reminder 🔥'), T('Le soir, si ta série va s’arrêter', 'In the evening, if your streak is about to end')],
+            ['news', T('Nouveautés de l’app', 'App updates'), T('Une fois par nouvelle version', 'Once per new version')],
           ].map(([k, label, sub]) => `
             <label class="switch-row"><span>${label}${sub ? `<small class="muted">${sub}</small>` : ''}</span><input type="checkbox" class="switch" data-notif="${k}" ${state.me.notif[k] ? 'checked' : ''}></label>`).join('')}
         </div>
@@ -2220,7 +3018,8 @@
 
       ${state.me.isAdmin ? adminHtml() : ''}
 
-      <button class="btn btn-soft btn-block" id="logout">${T('Se déconnecter', 'Log out')}</button>`;
+      <button class="btn btn-soft btn-block" id="logout">${T('Se déconnecter', 'Log out')}</button>
+      ${aboutLinks()}`;
 
     bindLangSwitch(view, () => renderMain());
     view.querySelectorAll('[data-color]').forEach((b) => action(b, async () => {
@@ -2264,6 +3063,7 @@
       };
     });
     document.getElementById('inviteBtn').onclick = () => showInvite(false);
+    bindAbout(view);
     action(document.getElementById('logout'), async () => {
       try { await api('POST', 'logout'); } catch { /* déjà déconnecté */ }
       stopPolling();
@@ -2282,7 +3082,8 @@
   }
 
   function adminHtml() {
-    const s = state.settings;
+    // Planning affiché (et enregistré) dans le fuseau de ce téléphone ; chacun le voit ensuite dans le sien.
+    const s = { ...state.settings, startHour: Math.round(hourToLocal(state.settings.startHour, state.settings.timezone)) % 24, endHour: Math.round(hourToLocal(state.settings.endHour, state.settings.timezone)) % 24, timezone: myTz };
     // Fin : de « début + 1 h » à « début − 1 h » (le lendemain). Les deux heures sont incluses.
     const endOptions = (start, end) => Array.from({ length: 23 }, (_, i) => (start + 1 + i) % 24)
       .map((h) => `<option value="${h}" ${h === end ? 'selected' : ''}>${hourLabel(h)}${h < start ? T(' (lendemain)', ' (next day)') : ''}</option>`).join('');
@@ -2308,7 +3109,6 @@
             <span class="name">${esc(p.name)}</span>
             <span class="status ${p.claimed ? 'on' : ''}">${p.claimed ? T('a rejoint', 'joined') : T('en attente', 'waiting')}</span>
             <button class="icon-btn" data-rename="${p.id}" title="${T('Renommer', 'Rename')}" aria-label="${T('Renommer', 'Rename')}">${icon('edit')}</button>
-            ${p.claimed && p.id !== state.me.playerId ? `<button class="icon-btn" data-recover="${p.id}" title="${T('Code de récupération (PIN oublié)', 'Recovery code (forgot PIN)')}" aria-label="${T('Code de récupération', 'Recovery code')}">${icon('key')}</button>` : ''}
             ${p.claimed && p.id !== state.me.playerId ? `<button class="icon-btn" data-reset="${p.id}" title="${T('Détacher ce nom de son compte', 'Unlink this name from its account')}" aria-label="${T('Détacher', 'Unlink')}">${icon('trash')}</button>` : ''}
             ${!p.claimed ? `<button class="icon-btn" data-remove="${p.id}" title="${T('Retirer', 'Remove')}" aria-label="${T('Retirer', 'Remove')}">${icon('trash')}</button>` : ''}
           </div>`).join('')}
@@ -2320,13 +3120,13 @@
       <div class="card">
         <div class="card-title">${T('Planning des questions', 'Question schedule')}</div>
         <div class="settings-grid">
-          <label>${T('Toutes les (heures)', 'Every (hours)')}<input class="input" id="sInterval" type="number" inputmode="decimal" step="0.25" min="0.02" max="24" value="${s.intervalHours}"></label>
+          <label>${T('Toutes les (heures, 4 min.)', 'Every (hours, min. 4)')}<input class="input" id="sInterval" type="number" inputmode="decimal" step="0.5" min="4" max="24" value="${s.intervalHours}"></label>
           <label>${T('Durée du vote (heures)', 'Voting time (hours)')}<input class="input" id="sPoll" type="number" inputmode="decimal" step="1" min="0.02" max="168" value="${s.pollHours}"></label>
           <label>${T('À partir de', 'From')}<select class="input" id="sStart">${Array.from({ length: 24 }, (_, h) => `<option value="${h}" ${h === s.startHour ? 'selected' : ''}>${hourLabel(h)}</option>`).join('')}</select></label>
           <label>${T('Jusqu’à (inclus)', 'Until (included)')}<select class="input" id="sEnd">${endOptions(s.startHour, s.endHour)}</select></label>
         </div>
         <p class="muted small" id="sWindow" style="margin:8px 0 0">${scheduleText(s)}</p>
-        <label>${T('Fuseau horaire', 'Time zone')}<input class="input" id="sTz" value="${esc(s.timezone)}"></label>
+        <p class="muted small tz-note">${T(`Heures de ton fuseau (${esc(myTz)}). Chacun les voit dans son propre fuseau.`, `Hours in your time zone (${esc(myTz)}). Everyone sees them in their own time zone.`)}${state.settings.timezone !== myTz ? T(` Le groupe était réglé sur ${esc(state.settings.timezone)} : en enregistrant, il passe sur le tien (mêmes horaires).`, ` The group was set to ${esc(state.settings.timezone)}: saving switches it to yours (same times).`) : ''}</p>
         <p class="muted small">${T('Prochaine question auto', 'Next auto question')} : <b>${state.nextDrop ? clock(state.nextDrop) : '—'}</b> · ${plural(state.remainingQuestions, 'question')} ${T('en réserve', 'left')}</p>
         <p class="muted small" style="margin-top:0">${T('Une nouvelle durée de vote s’applique aussi aux questions en cours.', 'A new voting time also applies to the questions already running.')}</p>
         <div class="row">
@@ -2336,8 +3136,11 @@
       </div>
 
       <div class="card">
-        <div class="card-title">${T('Options de vote', 'Voting options')}</div>
+        <div class="card-title">${T('Options du groupe', 'Group options')}</div>
+        <label class="switch-row"><span>${T('Questions en plus par jour', 'Extra questions per day')}<small class="muted">${T('Combien chacun peut en lancer avec le bouton +, en plus du planning.', 'How many each person can launch with the + button, on top of the schedule.')}</small></span>
+          <span class="stepper"><button type="button" data-step="-1" aria-label="−">−</button><b id="dropsN">${s.dropsPerDay ?? 1}</b><button type="button" data-step="1" aria-label="+">+</button></span></label>
         <label class="switch-row"><span>${T('Réponse « Personne »', '“Nobody” answer')}<small class="muted">${T('Sur les questions au conditionnel (« Qui ferait… »), on peut voter pour personne.', 'On “Who would…” questions, people can vote for nobody.')}</small></span><input type="checkbox" class="switch" id="allowNobody" ${s.allowNobody ? 'checked' : ''}></label>
+        <label class="switch-row"><span>${T('Questionnaire de profil', 'Profile questionnaire')}<small class="muted">${T('Un onglet Quiz en plus : chacun répond à quelques questions (âge, études ou boulot, couple…), et les questions qui vous collent tombent plus souvent. Réponses anonymes.', 'An extra Quiz tab: everyone answers a few questions (age, studies or work, relationship…), and the questions that fit you come up more often. Answers stay anonymous.')}</small></span><input type="checkbox" class="switch" id="profilesOn" ${s.profiles ? 'checked' : ''}></label>
       </div>
 
       <div class="card">
@@ -2409,7 +3212,7 @@
     }));
     action(document.getElementById('saveSettings'), async () => {
       const v = (id) => document.getElementById(id).value;
-      await api('PATCH', 'admin/settings', { intervalHours: v('sInterval'), pollHours: v('sPoll'), startHour: v('sStart'), endHour: v('sEnd'), timezone: v('sTz') });
+      await api('PATCH', 'admin/settings', { intervalHours: v('sInterval'), pollHours: v('sPoll'), startHour: v('sStart'), endHour: v('sEnd'), timezone: myTz });
       toast(T('Planning enregistré ⏰', 'Schedule saved ⏰'));
       document.activeElement.blur();
       await refresh();
@@ -2424,6 +3227,25 @@
         toast(err.message);
       }
     };
+    document.getElementById('profilesOn').onchange = async (e) => {
+      try {
+        await api('PATCH', 'admin/settings', { profiles: e.target.checked });
+        toast(e.target.checked ? T('Questionnaire activé : un onglet Quiz apparaît pour tout le monde', 'Questionnaire on: a Quiz tab shows up for everyone') : T('Questionnaire désactivé', 'Questionnaire off'));
+        await refresh();
+      } catch (err) {
+        e.target.checked = !e.target.checked;
+        toast(err.message);
+      }
+    };
+    view.querySelectorAll('[data-step]').forEach((b) => action(b, async () => {
+      const n = Math.max(0, Math.min(10, (state.settings.dropsPerDay ?? 1) + Number(b.dataset.step)));
+      if (n === (state.settings.dropsPerDay ?? 1)) return;
+      await api('PATCH', 'admin/settings', { dropsPerDay: n });
+      state.settings.dropsPerDay = n;
+      document.getElementById('dropsN').textContent = n;
+      toast(T(`${n} question${n > 1 ? 's' : ''} en plus par jour`, `${n} extra question${n > 1 ? 's' : ''} a day`));
+      softRefresh();
+    }));
     action(document.getElementById('forceDrop'), async () => {
       const { poll } = await api('POST', 'admin/drop-auto');
       replacePoll(poll);
@@ -2463,7 +3285,7 @@
       if (end === start) end = (start + 1) % 24;
       sEnd.innerHTML = Array.from({ length: 23 }, (_, i) => (start + 1 + i) % 24)
         .map((h) => `<option value="${h}" ${h === end ? 'selected' : ''}>${hourLabel(h)}${h < start ? T(' (lendemain)', ' (next day)') : ''}</option>`).join('');
-      document.getElementById('sWindow').textContent = scheduleText({ ...state.settings, intervalHours: Number(document.getElementById('sInterval').value) || state.settings.intervalHours, startHour: start, endHour: end });
+      document.getElementById('sWindow').textContent = scheduleText({ ...state.settings, timezone: myTz, intervalHours: Number(document.getElementById('sInterval').value) || state.settings.intervalHours, startHour: start, endHour: end });
     };
     sStart.onchange = sync;
     sEnd.onchange = sync;
@@ -2494,6 +3316,7 @@
       try {
         const res = await fetch('/api/events', { headers: { Authorization: 'Bearer ' + token, 'X-Group': groupId || '' }, signal: ctrl.signal });
         if (!res.ok || !res.body) throw new Error('live');
+        for (const k of [...chats.keys()]) if (k !== chatOpen) chats.delete(k);
         if (chatOpen) loadChat(chatOpen, true); // rattrape ce qui a pu être manqué
         const reader = res.body.getReader();
         const dec = new TextDecoder();
@@ -2559,7 +3382,7 @@
     } else if (type === 'read') {
       if (c) {
         c.reads[d.playerId] = Math.max(c.reads[d.playerId] || 0, d.seq);
-        if (chatOpen === d.channel) renderChatMessages();
+        if (chatOpen === d.channel) updateSeenLine();
       }
     } else if (type === 'react') {
       const m = c && c.messages.find((x) => x.id === d.id);
@@ -2639,8 +3462,11 @@
   let readTimer = null;
   let replyTo = null; // message auquel on répond (glissé vers la droite)
   let pendingImages = []; // photos en cours d'envoi : { tmp, url, w, h }
+  // Collé en bas de la discussion ? Suivi en continu (pas seulement au moment de redessiner) : une photo qui finit
+  // de charger pendant qu'on remonte ne doit pas nous ramener en bas.
+  let stickBottom = true;
 
-  const tz = () => state.settings.timezone;
+  const tz = () => myTz;
   const dayKey = (t) => new Date(t).toLocaleDateString('fr-FR', { timeZone: tz() });
   const hhmm = (t) => new Date(t).toLocaleTimeString(LOC, { hour: '2-digit', minute: '2-digit', timeZone: tz() });
   function dayLabel(t) {
@@ -2691,6 +3517,12 @@
       </form>`;
     $chat.hidden = false;
     document.body.classList.add('noscroll');
+    stickBottom = true;
+    kbWasOpen = false;
+    const listEl = document.getElementById('chatList');
+    listEl.addEventListener('scroll', () => {
+      stickBottom = listEl.scrollHeight - listEl.scrollTop - listEl.clientHeight < 80;
+    }, { passive: true });
     syncGuard();
     renderChatHeader();
     fitChat();
@@ -2777,11 +3609,30 @@
   let popIgnore = false;
   const atRoot = () => !state;
 
+  // Chrome / Samsung Internet (Android) sautent, au retour, les entrées d'historique ajoutées avant que la
+  // personne ait touché la page : app ouverte depuis une notification ou rechargée → « retour » fermait l'app.
+  // On pose donc la garde seulement après un premier geste (tap, touche).
+  let guardWaiting = false;
+  function guardAfterGesture() {
+    if (guardWaiting) return;
+    guardWaiting = true;
+    const evs = ['pointerup', 'touchend', 'click', 'keydown'];
+    const go = () => {
+      if (navigator.userActivation && !navigator.userActivation.hasBeenActive) return;
+      evs.forEach((t) => window.removeEventListener(t, go, true));
+      guardWaiting = false;
+      setTimeout(syncGuard, 0);
+    };
+    evs.forEach((t) => window.addEventListener(t, go, true));
+  }
+
   function syncGuard() {
     if (!state) return;
     const guarded = !!(history.state && history.state.guard);
-    if (!atRoot() && !guarded) history.pushState({ guard: true }, '');
-    else if (atRoot() && guarded && !popIgnore) {
+    if (!atRoot() && !guarded) {
+      if (navigator.userActivation && !navigator.userActivation.hasBeenActive) return guardAfterGesture();
+      history.pushState({ guard: true }, '');
+    } else if (atRoot() && guarded && !popIgnore) {
       popIgnore = true;
       history.back();
     }
@@ -2791,7 +3642,8 @@
   function goBack() {
     if (!state) return false;
     // Dans l'ordre d'affichage : la photo en grand et les fenêtres passent au-dessus du chat.
-    if (viewerOpen()) closeViewer();
+    if (storyOpen()) closeStory();
+    else if (viewerOpen()) closeViewer();
     else if (!$sheet.hidden) closeSheet();
     else if (chatOpen) closeChat(true);
     else if (halfPick) { halfPick = null; renderView(); }
@@ -2851,18 +3703,19 @@
   // Sur mobile, le clavier réduit la zone visible : la fenêtre de chat suit exactement le haut du clavier.
   // Clavier ouvert : plus de marge « barre d'accueil » en bas (sinon un trou entre la barre de saisie et le clavier),
   // et un fond sous la fenêtre (CSS) pour ne pas voir l'app derrière un clavier transparent ou plus petit.
+  let kbWasOpen = false;
   function fitChat() {
     if (!chatOpen) return;
     const vv = window.visualViewport;
     if (!vv) return;
-    $chat.style.height = vv.height + 'px';
-    $chat.style.top = vv.offsetTop + 'px';
+    const h = vv.height + 'px';
+    const top = vv.offsetTop + 'px';
+    if ($chat.style.height !== h) $chat.style.height = h;
+    if ($chat.style.top !== top) $chat.style.top = top;
     const kb = window.innerHeight - vv.height > 120;
     $chat.classList.toggle('kb-open', kb);
-    if (kb && document.activeElement && document.activeElement.id === 'chatText') {
-      const list = document.getElementById('chatList');
-      if (list && list.scrollHeight - list.scrollTop - list.clientHeight < 160) scrollChatBottom();
-    }
+    if (kb && !kbWasOpen && stickBottom && document.activeElement && document.activeElement.id === 'chatText') scrollChatBottom();
+    kbWasOpen = kb;
   }
   if (window.visualViewport) {
     window.visualViewport.addEventListener('resize', fitChat);
@@ -2885,29 +3738,37 @@
     el.innerHTML = `<b class="clamp2">${esc(qText(p || t) || T('Discussion', 'Chat'))}</b><span>${esc(s.emoji)} ${esc(setName(s))}${status ? ' · ' + status : ''}</span>`;
   }
 
+  // Ce qu'on a en mémoire s'affiche tout de suite, puis on recharge toujours depuis le serveur : en arrière-plan
+  // (téléphone en veille, connexion coupée), des messages ont pu arriver sans qu'on les reçoive.
   async function loadChat(channel, force) {
     const c = chats.get(channel);
-    if (c && c.loaded && !force) {
+    const cached = !!(c && c.loaded);
+    if (cached && !force) {
       renderChatMessages(true);
       markReadSoon();
-      return;
     }
     try {
       const r = await api('GET', `chat/${channel}`);
-      chats.set(channel, { messages: r.messages, reads: r.reads, hasMore: r.hasMore, loaded: true, locked: !!r.locked, count: r.count || 0, poll: r.poll || null });
+      const prev = chats.get(channel);
+      // Garde les messages plus anciens déjà chargés (« Messages précédents »).
+      const older = prev && prev.loaded && !r.locked && r.messages.length ? prev.messages.filter((m) => m.id < r.messages[0].id) : [];
+      const next = { messages: older.concat(r.messages), reads: r.reads, hasMore: older.length ? prev.hasMore : r.hasMore, loaded: true, locked: !!r.locked, count: r.count || 0, poll: r.poll || null };
+      const same = prev && prev.loaded && JSON.stringify([prev.messages, prev.reads, prev.locked]) === JSON.stringify([next.messages, next.reads, next.locked]);
+      chats.set(channel, next);
       if (chatOpen === channel) {
         renderChatHeader();
-        renderChatMessages(true);
+        if (!same) renderChatMessages(!cached);
         markReadSoon();
       }
     } catch (e) {
-      toast(e.message);
+      if (!cached) toast(e.message);
     }
   }
 
   function scrollChatBottom() {
     const list = document.getElementById('chatList');
     if (list) list.scrollTop = list.scrollHeight;
+    stickBottom = true;
   }
 
   // ---------- Chat : réactions, « vu par », détail d'un message ----------
@@ -3308,7 +4169,7 @@
     const list = document.getElementById('chatList');
     const c = chats.get(chatOpen);
     if (!list || !c) return;
-    const atBottom = forceBottom || list.scrollHeight - list.scrollTop - list.clientHeight < 120;
+    const atBottom = forceBottom || stickBottom;
     const myPid = state.me.playerId;
     lockChatInput(!!c.locked);
     if (c.locked) {
@@ -3374,20 +4235,10 @@
           <div class="msg-body"><div class="bubble gif photo"><img src="${p.url}" width="${p.w}" height="${p.h}" alt=""><span class="spinner"></span></div></div>
         </div>`;
     }
-    // Accusé de lecture, en clair, sous le dernier message seulement (le détail : en touchant un message).
-    const lastMsg = c.messages[c.messages.length - 1];
-    if (lastMsg && selMsg !== lastMsg.id && !pendingImages.length) {
-      const { seen, unseen } = seenBy(c, lastMsg);
-      const mineLast = lastMsg.playerId === myPid;
-      let label = '';
-      if (seen.length && !unseen.length) label = T('Vu par tout le monde', 'Seen by everyone');
-      else if (seen.length) label = `${T('Vu par', 'Seen by')} ${namesList(seen)}`;
-      else if (mineLast) label = T('Envoyé', 'Sent');
-      if (label) html += `<div class="seen-line ${mineLast ? 'mine' : ''}">${icon('check')}<span>${label}</span></div>`;
-    }
+    html += seenLine(c);
     list.innerHTML = html;
 
-    list.querySelectorAll('img').forEach((img) => (img.onload = () => { if (atBottom) scrollChatBottom(); }));
+    list.querySelectorAll('img').forEach((img) => (img.onload = () => { if (stickBottom) scrollChatBottom(); }));
     list.querySelectorAll('[data-msg]').forEach((b) => bindMessagePress(b, Number(b.dataset.msg)));
     list.querySelectorAll('[data-row]').forEach((r) => { if (r.querySelector('.swipe-hint')) bindSwipeReply(r, Number(r.dataset.row)); });
     list.querySelectorAll('[data-jump]').forEach((q) => (q.onclick = (e) => {
@@ -3426,6 +4277,32 @@
       });
     }
     if (atBottom) scrollChatBottom();
+  }
+
+  // Accusé de lecture, en clair, sous le dernier message seulement (le détail : en touchant un message).
+  function seenLine(c) {
+    const lastMsg = c.messages[c.messages.length - 1];
+    if (!lastMsg || selMsg === lastMsg.id || pendingImages.length) return '';
+    const { seen, unseen } = seenBy(c, lastMsg);
+    const mineLast = lastMsg.playerId === state.me.playerId;
+    let label = '';
+    if (seen.length && !unseen.length) label = T('Vu par tout le monde', 'Seen by everyone');
+    else if (seen.length) label = `${T('Vu par', 'Seen by')} ${namesList(seen)}`;
+    else if (mineLast) label = T('Envoyé', 'Sent');
+    return label ? `<div class="seen-line ${mineLast ? 'mine' : ''}">${icon('check')}<span>${label}</span></div>` : '';
+  }
+  function updateSeenLine() {
+    const list = document.getElementById('chatList');
+    const c = chats.get(chatOpen);
+    if (!list || !c || c.locked) return;
+    const old = list.querySelector('.seen-line');
+    const tmp = document.createElement('div');
+    tmp.innerHTML = seenLine(c);
+    const fresh = tmp.firstElementChild;
+    if (old && fresh) old.replaceWith(fresh);
+    else if (old) old.remove();
+    else if (fresh) list.appendChild(fresh);
+    if (stickBottom) scrollChatBottom();
   }
 
   function lockChatInput(locked) {
@@ -3521,10 +4398,15 @@
       const u = new URL(e.data.url, location.origin);
       const ch = u.searchParams.get('chat');
       const gid = u.searchParams.get('g');
+      if (u.searchParams.get('recap')) pendingRecap = u.searchParams.get('recap');
+      if (u.searchParams.has('news')) pendingNews = true;
+      if (u.searchParams.has('feedback')) pendingFeedback = true;
+      if ((pendingNews || pendingFeedback) && (!gid || gid === groupId)) return openPendingAbout();
       if (gid && gid !== groupId) {
         pendingChat = ch;
         enterGroup(gid);
       } else if (ch && state) openChat(ch);
+      else if (pendingRecap && state) openRecapFromLink();
     });
   }
 
@@ -3677,7 +4559,8 @@
   // ---------- Démarrage ----------
 
   if (inviteCode) save('code', inviteCode.toUpperCase());
-  if (inviteCode || pendingChat || pendingGroup) history.replaceState(null, '', BASE);
+  if (inviteCode || pendingChat || pendingRecap || pendingNews || pendingFeedback || (pendingGroup && !restoring)) history.replaceState(null, '', BASE);
   if (token) startAccount();
-  else renderAuth(inviteCode ? 'signup' : null);
+  else if (inviteCode) ensureAccount().then(startAccount).catch((e) => renderWelcome(e.message)); // lien d'invitation : direct au choix du nom
+  else renderWelcome();
 })();

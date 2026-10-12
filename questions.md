@@ -8,6 +8,7 @@ Ce fichier contient toutes les questions intégrées. Le serveur le lit à chaqu
 - La ligne `> ...` est la description du set.
 - Une question par ligne, qui commence par `- `. Les stats sont entre backticks à la fin : `chaos`, `hot`, `cerveau`, `coeur`, `genance`, `toxique`, `exces`, avec une valeur de -2 à 3 (ex. `` `exces:3 genance:1` ``). Sans stats, la question compte quand même pour les victoires mais pas pour le radar.
 - Version anglaise (optionnelle) : `<!-- en: Name -->` sous la ligne id pour le nom du set, `> en: ...` pour la description, et une ligne `  en: Who would...?` juste sous chaque question. Sans traduction, la question s'affiche en français pour tout le monde.
+- Étiquettes (optionnelles) après les stats, pour le questionnaire de profil : `#alcool #soiree #couple #celib #etudes #travail #gaming #sport #voiture #coloc #parents #enfants #homme #femme #jeune #adulte #mixte`. Une question étiquetée tombe moins souvent si peu de gens du groupe sont concernés (ex. `#couple` dans un groupe de célibataires), jamais à zéro.
 - Supprimer une ligne retire la question (si elle a déjà été jouée, elle reste dans l'historique).
 - Modifier le texte d'une question = la remplacer par une nouvelle.
 - Redémarre le serveur pour appliquer les changements.
@@ -18,74 +19,78 @@ Ce fichier contient toutes les questions intégrées. Le serveur le lit à chaqu
 > Les soirées, l’alcool et les lendemains difficiles.
 > en: Parties, booze and rough mornings after.
 
-- Qui aurait le plus de chances de finir la soirée à dégueuler dans les chiottes ? `exces:3 genance:1`
+- Qui aurait le plus de chances de finir la soirée à dégueuler dans les chiottes ? `exces:3 genance:1` #alcool
   en: Who'd be most likely to end the night puking in the toilet?
-- Qui disparaîtrait sans prévenir en plein milieu de la soirée ? `chaos:2 toxique:1`
+- Qui disparaîtrait sans prévenir en plein milieu de la soirée ? `chaos:2 toxique:1` #soiree
   en: Who would vanish without a word right in the middle of the party?
-- Qui sortirait les shots alors que personne n’en veut ? `exces:3 chaos:1`
+- Qui sortirait les shots alors que personne n’en veut ? `exces:3 chaos:1` #alcool
   en: Who'd bust out the shots when nobody wants any?
-- Qui aurait la pire gueule de bois du groupe ? `exces:3`
+- Qui aurait la pire gueule de bois du groupe ? `exces:3` #alcool
   en: Who'd have the worst hangover in the group?
 - Qui finirait la soirée en pleurant dans les toilettes ? `genance:2 exces:2`
   en: Who'd end the night crying in the bathroom?
-- Qui serait le premier à se faire virer d’une boîte ? `chaos:3 exces:1`
+- Qui serait le premier à se faire virer d’une boîte ? `chaos:3 exces:1` #soiree
   en: Who'd be the first to get kicked out of a club?
-- Qui se souviendrait de rien le lendemain ? `exces:3 cerveau:-1`
+- Qui se souviendrait de rien le lendemain ? `exces:3 cerveau:-1` #alcool
   en: Who wouldn't remember a thing the next day?
-- Qui pourrait rentrer à 10h du matin sans ses chaussures ? `chaos:2 exces:2`
+- Qui pourrait rentrer à 10h du matin sans ses chaussures ? `chaos:2 exces:2` #soiree
   en: Who could roll home at 10am with no shoes on?
 - Qui serait le premier à rentrer se coucher ? `exces:-2 chaos:-1`
   en: Who'd be the first to head home to bed?
-- Qui draguerait le videur pour pouvoir rentrer ? `hot:2 chaos:1`
+- Qui draguerait le videur pour pouvoir rentrer ? `hot:2 chaos:1` #soiree
   en: Who'd flirt with the bouncer to get in?
-- Qui finirait toutes ses soirées au kebab à 4h du mat ? `exces:2`
+- Qui finirait toutes ses soirées au kebab à 4h du mat ? `exces:2` #soiree
   en: Who'd end every night out at the kebab place at 4am?
-- Qui enverrait des vocaux incompréhensibles après trois verres ? `genance:2 exces:2`
+- Qui enverrait des vocaux incompréhensibles après trois verres ? `genance:2 exces:2` #alcool
   en: Who'd send voice notes nobody can understand after three drinks?
 - Qui pourrait finir la soirée au commissariat ? `chaos:3 exces:1`
   en: Who could end the night at the police station?
-- Qui ramènerait la bouteille la moins chère pour boire celle des autres ? `toxique:2 exces:1`
+- Qui ramènerait la bouteille la moins chère pour boire celle des autres ? `toxique:2 exces:1` #alcool
   en: Who'd bring the cheapest bottle so they can drink everyone else's?
-- Qui deviendrait le plus insupportable après trois verres ? `toxique:2 exces:2`
+- Qui deviendrait le plus insupportable après trois verres ? `toxique:2 exces:2` #alcool
   en: Who'd get the most unbearable after three drinks?
-- Qui monopoliserait l’enceinte toute la soirée ? `toxique:1 chaos:2`
+- Qui monopoliserait l’enceinte toute la soirée ? `toxique:1 chaos:2` #soiree
   en: Who'd hog the speaker all night?
-- Qui pourrait finir la nuit à dormir dans une baignoire ? `exces:2 chaos:2`
+- Qui pourrait finir la nuit à dormir dans une baignoire ? `exces:2 chaos:2` #alcool
   en: Who could end up sleeping in a bathtub?
-- Qui serait le pire pour faire semblant d’être sobre ? `genance:2 exces:2`
+- Qui serait le pire pour faire semblant d’être sobre ? `genance:2 exces:2` #alcool
   en: Who'd be the worst at pretending to be sober?
-- Qui lancerait un after chez quelqu’un d’autre sans demander ? `chaos:2 toxique:1 exces:1`
+- Qui lancerait un after chez quelqu’un d’autre sans demander ? `chaos:2 toxique:1 exces:1` #soiree
   en: Who'd start an afterparty at someone else's place without asking?
-- Qui aurait le plus de photos compromettantes des autres dans son téléphone ? `toxique:2`
+- Qui aurait le plus de photos compromettantes des autres dans son téléphone ? `toxique:2` #soiree
   en: Who'd have the most compromising pics of everyone else on their phone?
-- Qui serait le premier à danser sur une table ? `chaos:2 hot:1 exces:1`
+- Qui serait le premier à danser sur une table ? `chaos:2 hot:1 exces:1` #soiree
   en: Who'd be the first to dance on a table?
-- Qui arriverait à pécho à chaque soirée sans que personne comprenne comment ? `hot:3`
+- Qui arriverait à pécho à chaque soirée sans que personne comprenne comment ? `hot:3` #soiree
   en: Who'd manage to hook up at every party and nobody gets how?
-- Qui serait pompette après une seule bière ? `genance:2 exces:1`
+- Qui serait pompette après une seule bière ? `genance:2 exces:1` #alcool
   en: Who'd be tipsy after just one beer?
-- Qui mélangerait tous les alcools « pour voir » ? `exces:3 cerveau:-2`
+- Qui mélangerait tous les alcools « pour voir » ? `exces:3 cerveau:-2` #alcool
   en: Who'd mix every kind of booze "just to see"?
-- Qui tiendrait les cheveux des autres quand ils vomissent ? `coeur:3 exces:-1`
+- Qui tiendrait les cheveux des autres quand ils vomissent ? `coeur:3 exces:-1` #alcool
   en: Who'd hold everyone's hair back when they puke?
-- Qui organiserait les meilleures soirées ? `exces:2 chaos:1 coeur:1`
+- Qui organiserait les meilleures soirées ? `exces:2 chaos:1 coeur:1` #soiree
   en: Who'd throw the best parties?
-- Qui casserait un verre (ou trois) à chaque soirée ? `genance:2 chaos:1`
+- Qui casserait un verre (ou trois) à chaque soirée ? `genance:2 chaos:1` #soiree
   en: Who'd break a glass (or three) at every party?
-- Qui dirait « ce soir je bois pas » et finirait le plus déchiré de tous ? `exces:3 cerveau:-1`
+- Qui dirait « ce soir je bois pas » et finirait le plus déchiré de tous ? `exces:3 cerveau:-1` #alcool
   en: Who'd say "I'm not drinking tonight" and end up the most wasted of all?
-- Qui pourrait se réveiller dans une autre ville sans savoir comment ? `chaos:3 exces:1`
+- Qui pourrait se réveiller dans une autre ville sans savoir comment ? `chaos:3 exces:1` #alcool
   en: Who could wake up in another city with no clue how they got there?
-- Qui deviendrait meilleur pote avec des inconnus aux toilettes de la boîte ? `exces:2 chaos:1`
+- Qui deviendrait meilleur pote avec des inconnus aux toilettes de la boîte ? `exces:2 chaos:1` #soiree
   en: Who'd become best friends with total strangers in the club bathroom?
-- Qui tu choisirais pour te ramener chez toi après une soirée trop arrosée ? `coeur:3 exces:-2`
+- Qui tu choisirais pour te ramener chez toi après une soirée trop arrosée ? `coeur:3 exces:-2` #alcool
   en: Who would you pick to get you home after a way too boozy night?
 - À qui tu confierais ta CB pour toute une soirée ? `coeur:2 exces:-2 cerveau:1`
   en: Who would you trust with your card for a whole night out?
-- Avec qui tu partirais en after jusqu’à midi ? `exces:3 chaos:2`
+- Avec qui tu partirais en after jusqu’à midi ? `exces:3 chaos:2` #soiree
   en: Who would you hit an afterparty with till noon?
-- Qui tu appellerais pour sauver une soirée qui meurt ? `chaos:2 exces:2`
+- Qui tu appellerais pour sauver une soirée qui meurt ? `chaos:2 exces:2` #soiree
   en: Who would you call to save a dying party?
+- Qui ferait un PowerPoint en soirée pour défendre une théorie absurde ? `cerveau:1 genance:2 chaos:1` #soiree
+  en: Who’d make a PowerPoint at a party to defend an absurd theory?
+- Qui lancerait un débat philo à 4h du matin ? `cerveau:2 exces:1` #soiree
+  en: Who’d start a philosophy debate at 4am?
 
 ## 💀 Sans filtre
 <!-- id: sans-filtre -->
@@ -143,9 +148,9 @@ Ce fichier contient toutes les questions intégrées. Le serveur le lit à chaqu
   en: Who could sell their own mom for 1,000 bucks?
 - Qui ferait semblant d’écouter quand on lui parle ? `toxique:2`
   en: Who'd pretend to listen when you're talking to them?
-- Qui lécherait le plus les bottes de son boss ? `toxique:2`
+- Qui lécherait le plus les bottes de son boss ? `toxique:2` #travail
   en: Who'd suck up to their boss the most?
-- Qui aurait la pire hygiène en coloc ? `genance:3 hot:-2`
+- Qui aurait la pire hygiène en coloc ? `genance:3 hot:-2` #coloc
   en: Who'd have the worst hygiene as a roommate?
 - Qui nous lâcherait dès sa première relation sérieuse ? `toxique:2 coeur:-2`
   en: Who'd ditch us as soon as they got into their first serious relationship?
@@ -161,6 +166,8 @@ Ce fichier contient toutes les questions intégrées. Le serveur le lit à chaqu
   en: Who would you block first if you had to block someone in the group?
 - Qui tu inviterais jamais à un repas de famille ? `genance:2 chaos:1`
   en: Who would you never invite to a family dinner?
+- Qui quitterait le groupe WhatsApp sur un coup de tête ? `chaos:2 toxique:1`
+  en: Who’d leave the group chat on a whim?
 
 ## 🔮 Futur & Destin
 <!-- id: futur -->
@@ -214,7 +221,7 @@ Ce fichier contient toutes les questions intégrées. Le serveur le lit à chaqu
   en: Who'll be the boss everyone hates?
 - Qui gagnera au Loto et perdra tout en un an ? `exces:2 chaos:2 cerveau:-1`
   en: Who'll win the lottery and blow it all in a year?
-- Qui sera encore en soirée à 50 ans comme si de rien n’était ? `exces:3 chaos:1`
+- Qui sera encore en soirée à 50 ans comme si de rien n’était ? `exces:3 chaos:1` #soiree
   en: Who'll still be partying at 50 like nothing's changed?
 - Qui aura un prix Nobel ? `cerveau:3 exces:-1`
   en: Who'll win a Nobel Prize?
@@ -236,6 +243,8 @@ Ce fichier contient toutes les questions intégrées. Le serveur le lit à chaqu
   en: Who would you pick as your best man or maid of honor?
 - À qui tu confierais tes économies pour les investir ? `cerveau:3 coeur:1`
   en: Who would you trust to invest your savings?
+- Qui organisera les retrouvailles du groupe dans 20 ans ? `coeur:2`
+  en: Who’ll organise the group reunion in 20 years?
 
 ## 🤡 Gênance & Boulets
 <!-- id: genance -->
@@ -253,7 +262,7 @@ Ce fichier contient toutes les questions intégrées. Le serveur le lit à chaqu
   en: Who'd say "you too" when the waiter says "enjoy your meal"?
 - Qui écrirait les pires textos (fautes, émojis, pavés) ? `genance:2 cerveau:-1`
   en: Who'd write the worst texts (typos, emojis, walls of text)?
-- Qui serait capable d’appeler sa prof « maman » ? `genance:3`
+- Qui serait capable d’appeler sa prof « maman » ? `genance:3` #etudes
   en: Who'd be capable of calling their teacher "mom"?
 - Qui se retrouverait coincé quelque part (porte, ascenseur, pull) ? `genance:3 chaos:1`
   en: Who'd get stuck somewhere (door, elevator, sweater)?
@@ -293,7 +302,7 @@ Ce fichier contient toutes les questions intégrées. Le serveur le lit à chaqu
   en: Who'd trip on a step in front of their crush?
 - Qui sortirait des références que personne ne comprend ? `genance:1 cerveau:2`
   en: Who'd drop references nobody gets?
-- Qui dirait « je t’aime » par réflexe en raccrochant avec son boss ? `genance:3`
+- Qui dirait « je t’aime » par réflexe en raccrochant avec son boss ? `genance:3` #travail
   en: Who'd say "love you" out of habit when hanging up with their boss?
 - Qui se ridiculiserait le plus en essayant d’avoir l’air cool ? `genance:3 hot:-1`
   en: Who'd embarrass themselves the most trying to look cool?
@@ -307,7 +316,7 @@ Ce fichier contient toutes les questions intégrées. Le serveur le lit à chaqu
   en: Who would you never bring to a job interview?
 - Qui tu cacherais le plus devant tes parents ? `genance:2 chaos:1`
   en: Who would you hide the most from your parents?
-- Qui tu éviterais de présenter à ton boss ? `genance:2 chaos:1`
+- Qui tu éviterais de présenter à ton boss ? `genance:2 chaos:1` #travail
   en: Who would you avoid introducing to your boss?
 - Qui tu laisserais jamais parler à ton crush ? `genance:2 toxique:1`
   en: Who would you never let talk to your crush?
@@ -354,7 +363,7 @@ Ce fichier contient toutes les questions intégrées. Le serveur le lit à chaqu
   en: Who'd post 40 stories with their other half in the very first week?
 - Qui serait le meilleur pour consoler après une rupture ? `coeur:3 cerveau:1`
   en: Who'd be the best at cheering you up after a breakup?
-- Qui aurait le plus de matchs sur les applis ? `hot:3`
+- Qui aurait le plus de matchs sur les applis ? `hot:3` #celib
   en: Who'd get the most matches on the apps?
 - Qui vivrait le pire premier date du groupe ? `genance:3`
   en: Who'd have the worst first date in the group?
@@ -370,7 +379,7 @@ Ce fichier contient toutes les questions intégrées. Le serveur le lit à chaqu
   en: Who'd block and unblock their ex at least five times?
 - Qui se ferait tout un film à partir d’un simple like ? `genance:2 cerveau:-1`
   en: Who'd make up a whole movie in their head over one like?
-- Qui mentirait le plus sur son profil Tinder ? `toxique:2 hot:-1`
+- Qui mentirait le plus sur son profil Tinder ? `toxique:2 hot:-1` #celib
   en: Who'd lie the most on their Tinder profile?
 - Qui pourrait se faire larguer par SMS le jour de son anniversaire ? `genance:2`
   en: Who could get dumped over text on their birthday?
@@ -433,7 +442,7 @@ Ce fichier contient toutes les questions intégrées. Le serveur le lit à chaqu
   en: Who'd sell Earth to the aliens for their own spaceship?
 - Qui ferait une teuf dans le bunker pendant la fin du monde ? `exces:3 chaos:2`
   en: Who'd throw a party in the bunker during the end of the world?
-- Qui planquerait l’alcool du bunker pour lui tout seul ? `exces:3 toxique:2`
+- Qui planquerait l’alcool du bunker pour lui tout seul ? `exces:3 toxique:2` #alcool
   en: Who'd stash the bunker's booze to keep it all for themselves?
 - Qui survivrait le plus longtemps seul dans la forêt ? `cerveau:2 chaos:-1`
   en: Who'd survive the longest alone in the woods?
@@ -470,7 +479,7 @@ Ce fichier contient toutes les questions intégrées. Le serveur le lit à chaqu
 
 - Qui serait à découvert dès le 5 du mois ? `cerveau:-1 exces:2 chaos:1`
   en: Who'd be overdrawn by the 5th of the month?
-- Qui serait le coloc qui ne sort jamais les poubelles ? `toxique:2 chaos:1`
+- Qui serait le coloc qui ne sort jamais les poubelles ? `toxique:2 chaos:1` #coloc
   en: Who'd be the roommate who never takes out the trash?
 - Qui arriverait à tuer un cactus ? `genance:2 cerveau:-2`
   en: Who'd manage to kill a cactus?
@@ -478,15 +487,15 @@ Ce fichier contient toutes les questions intégrées. Le serveur le lit à chaqu
   en: Who'd forget to do their taxes?
 - Qui mangerait encore des pâtes au ketchup à 30 ans ? `genance:2 cerveau:-1`
   en: Who'd still be eating pasta with ketchup at 30?
-- Qui serait le premier à se faire virer pour avoir mal parlé à son boss ? `chaos:3 toxique:1`
+- Qui serait le premier à se faire virer pour avoir mal parlé à son boss ? `chaos:3 toxique:1` #travail
   en: Who'd be the first to get fired for mouthing off to their boss?
 - Qui mentirait le plus sur son salaire ? `toxique:2`
   en: Who'd lie the most about their salary?
-- Qui serait proprio avant 30 ans grâce à papa-maman ? `toxique:1 chaos:-1`
+- Qui serait proprio avant 30 ans grâce à papa-maman ? `toxique:1 chaos:-1` #jeune
   en: Who'd own a place before 30 thanks to mommy and daddy?
 - Qui commanderait Uber Eats trois fois par semaine en disant qu’il fait des économies ? `exces:3 cerveau:-1`
   en: Who'd order Uber Eats three times a week while saying they're saving money?
-- Qui serait le coloc qui pique la bouffe des autres dans le frigo ? `toxique:3 exces:1`
+- Qui serait le coloc qui pique la bouffe des autres dans le frigo ? `toxique:3 exces:1` #coloc
   en: Who'd be the roommate who steals everyone else's food from the fridge?
 - Qui aurait le frigo le plus triste du groupe ? `genance:2 exces:1`
   en: Who'd have the saddest fridge in the group?
@@ -496,11 +505,11 @@ Ce fichier contient toutes les questions intégrées. Le serveur le lit à chaqu
   en: Who'd blow their whole bonus in one night?
 - Qui se ferait arnaquer par une fausse crypto ? `cerveau:-2 chaos:1`
   en: Who'd get scammed by some fake crypto?
-- Qui ferait une sieste aux toilettes du boulot ? `exces:1 genance:2`
+- Qui ferait une sieste aux toilettes du boulot ? `exces:1 genance:2` #travail
   en: Who'd take a nap in the bathroom at work?
-- Qui enverrait des mails pros remplis de fautes et d’émojis ? `genance:3 cerveau:-1`
+- Qui enverrait des mails pros remplis de fautes et d’émojis ? `genance:3 cerveau:-1` #travail
   en: Who'd send work emails full of typos and emojis?
-- Qui serait le collègue qui s’attribue le travail des autres ? `toxique:3`
+- Qui serait le collègue qui s’attribue le travail des autres ? `toxique:3` #travail
   en: Who'd be the coworker who takes credit for everyone else's work?
 - Qui laisserait son linge propre sur une chaise pendant trois semaines ? `chaos:2`
   en: Who'd leave their clean laundry on a chair for three weeks?
@@ -508,7 +517,7 @@ Ce fichier contient toutes les questions intégrées. Le serveur le lit à chaqu
   en: Who'd leave the dishes soaking for a week?
 - Qui pourrait faire une crise d’angoisse devant un formulaire de la CAF ? `cerveau:-1 genance:2`
   en: Who could have a panic attack over a government benefits form?
-- Qui serait le coloc qui ramène quelqu’un de différent chaque semaine ? `chaos:2 hot:2 toxique:1`
+- Qui serait le coloc qui ramène quelqu’un de différent chaque semaine ? `chaos:2 hot:2 toxique:1` #coloc
   en: Who'd be the roommate who brings someone different home every week?
 - Qui accumulerait le plus d’amendes impayées ? `chaos:2 cerveau:-1`
   en: Who'd rack up the most unpaid tickets?
@@ -516,9 +525,9 @@ Ce fichier contient toutes les questions intégrées. Le serveur le lit à chaqu
   en: Who'd make an Excel sheet to split the bill down to the cent?
 - Qui laisserait son courrier s’empiler sans jamais l’ouvrir ? `cerveau:-1 chaos:1`
   en: Who'd let their mail pile up and never open it?
-- Qui ferait du télétravail depuis son lit toute la journée ? `exces:2`
+- Qui ferait du télétravail depuis son lit toute la journée ? `exces:2` #travail
   en: Who'd work from home in bed all day?
-- Qui serait capable de démissionner par message vocal ? `chaos:3`
+- Qui serait capable de démissionner par message vocal ? `chaos:3` #travail
   en: Who'd be capable of quitting by voice message?
 - Qui serait le premier à retourner vivre chez ses parents ? `genance:2 cerveau:-1`
   en: Who'd be the first to move back in with their parents?
@@ -536,6 +545,26 @@ Ce fichier contient toutes les questions intégrées. Le serveur le lit à chaqu
   en: Who would you call to build your IKEA furniture?
 - À qui tu confierais ta plante pendant les vacances ? `cerveau:1 coeur:1`
   en: Who would you trust with your plant while you're on vacation?
+- Qui rendrait son mémoire à 23h59 ? `chaos:2` #etudes
+  en: Who’d hand in their dissertation at 11:59pm?
+- Qui ferait des nuits blanches avant chaque partiel ? `exces:1 chaos:1` #etudes
+  en: Who’d pull an all-nighter before every exam?
+- Qui dormirait au premier rang de l’amphi ? `genance:2` #etudes
+  en: Who’d fall asleep in the front row of a lecture?
+- Qui changerait trois fois d’orientation ? `chaos:2` #etudes
+  en: Who’d switch courses three times?
+- Qui ferait un stage où il ne fait que des cafés ? `genance:1 cerveau:-1` #etudes
+  en: Who’d do an internship that’s just making coffee?
+- Qui quitterait un CDI pour « se lancer » ? `chaos:2` #travail
+  en: Who’d quit a safe job to “go it alone”?
+- Qui négocierait le mieux son salaire ? `cerveau:2 toxique:1` #travail
+  en: Who’d negotiate their salary best?
+- Qui organiserait des réunions qui auraient pu être un mail ? `genance:1 toxique:1` #travail
+  en: Who’d hold meetings that could’ve been an email?
+- Qui aurait un LinkedIn plus impressionnant que sa vraie vie ? `genance:1 toxique:1`
+  en: Whose LinkedIn would be more impressive than their actual life?
+- Qui cartonnerait au premier entretien d’embauche ? `cerveau:2 hot:1`
+  en: Who’d smash their first job interview?
 
 ## 🤫 Secrets & Mensonges
 <!-- id: secrets -->
@@ -559,7 +588,7 @@ Ce fichier contient toutes les questions intégrées. Le serveur le lit à chaqu
   en: Who'd make up a death in the family to get out of something?
 - Qui garderait un secret même sous la torture ? `coeur:3`
   en: Who'd keep a secret even under torture?
-- Qui craquerait et avouerait tout au premier verre ? `exces:3`
+- Qui craquerait et avouerait tout au premier verre ? `exces:3` #alcool
   en: Who'd crack and spill everything after one drink?
 - Qui aurait un groupe WhatsApp secret pour parler de nous ? `toxique:3`
   en: Who'd have a secret WhatsApp group to talk about us?
@@ -583,7 +612,7 @@ Ce fichier contient toutes les questions intégrées. Le serveur le lit à chaqu
   en: Who'd make the best double agent?
 - Qui se ferait griller parce que son histoire change à chaque fois ? `cerveau:-2 genance:2`
   en: Who'd get caught because their story changes every time?
-- Qui organiserait une soirée en cachette pour ne pas inviter quelqu’un ? `toxique:3 coeur:-1`
+- Qui organiserait une soirée en cachette pour ne pas inviter quelqu’un ? `toxique:3 coeur:-1` #soiree
   en: Who'd throw a secret party just so they don't have to invite someone?
 - Qui simulerait sa propre mort pour échapper à ses dettes ? `chaos:3 toxique:1 cerveau:1`
   en: Who'd fake their own death to get out of their debts?
@@ -593,13 +622,13 @@ Ce fichier contient toutes les questions intégrées. Le serveur le lit à chaqu
   en: Who'd resell the gifts people give them?
 - Qui ferait semblant d’être malade pour éviter l’anniversaire de quelqu’un ici ? `toxique:1 coeur:-2`
   en: Who'd fake being sick to skip the birthday of someone here?
-- Qui ferait l’ange devant les parents et le démon en soirée ? `exces:2 chaos:2 toxique:1`
+- Qui ferait l’ange devant les parents et le démon en soirée ? `exces:2 chaos:2 toxique:1` #soiree
   en: Who'd be an angel in front of the parents and a demon at parties?
 - Qui lirait les messages de quelqu’un par-dessus son épaule ? `toxique:2 chaos:1`
   en: Who'd read someone's texts over their shoulder?
-- Qui ferait semblant de connaître toutes les chansons en soirée ? `genance:2`
+- Qui ferait semblant de connaître toutes les chansons en soirée ? `genance:2` #soiree
   en: Who'd pretend to know every song at parties?
-- Qui inventerait un faux rendez-vous pour se barrer d’une soirée ? `toxique:1 chaos:1`
+- Qui inventerait un faux rendez-vous pour se barrer d’une soirée ? `toxique:1 chaos:1` #soiree
   en: Who'd make up a fake appointment to bail on a party?
 - Qui oublierait tous les secrets qu’on lui raconte ? `cerveau:-2 exces:1`
   en: Who'd forget every secret people tell them?
@@ -628,7 +657,7 @@ Ce fichier contient toutes les questions intégrées. Le serveur le lit à chaqu
   en: Who'd post motivational quotes after a breakup?
 - Qui achèterait des followers ? `genance:3 toxique:1`
   en: Who'd buy followers?
-- Qui aurait le plus de matchs Tinder et zéro rendez-vous ? `hot:1 genance:2`
+- Qui aurait le plus de matchs Tinder et zéro rendez-vous ? `hot:1 genance:2` #celib
   en: Who'd have the most Tinder matches and zero dates?
 - Qui enverrait des vocaux de 7 minutes ? `genance:2 chaos:1`
   en: Who'd send 7-minute voice notes?
@@ -648,7 +677,7 @@ Ce fichier contient toutes les questions intégrées. Le serveur le lit à chaqu
   en: Who'd read the group chat and never reply?
 - Qui répondrait « mdr » sans jamais rire ? `toxique:1`
   en: Who'd reply "lol" without ever actually laughing?
-- Qui enverrait un message bourré qu’il regretterait toute sa vie ? `exces:3 genance:2`
+- Qui enverrait un message bourré qu’il regretterait toute sa vie ? `exces:3 genance:2` #alcool
   en: Who'd send a drunk text they'd regret for the rest of their life?
 - Qui pourrait se faire cancel pour un vieux tweet ? `toxique:2 chaos:2`
   en: Who could get canceled over an old tweet?
@@ -658,7 +687,7 @@ Ce fichier contient toutes les questions intégrées. Le serveur le lit à chaqu
   en: Who'd be on their phone even at a funeral?
 - Qui supprimerait ses posts s’ils n’ont pas assez de likes ? `genance:2`
   en: Who'd delete their posts if they don't get enough likes?
-- Qui ferait un live TikTok en pleine dispute de couple ? `chaos:3 genance:2`
+- Qui ferait un live TikTok en pleine dispute de couple ? `chaos:3 genance:2` #couple
   en: Who'd go live on TikTok in the middle of a fight with their bf or gf?
 - Qui aurait la pire playlist Spotify ? `genance:2 cerveau:-1`
   en: Who'd have the worst Spotify playlist?
@@ -682,7 +711,7 @@ Ce fichier contient toutes les questions intégrées. Le serveur le lit à chaqu
   en: Who would you leave your phone unlocked with?
 - Qui tu choisirais pour gérer ton Insta pendant une semaine ? `cerveau:2 hot:1`
   en: Who would you pick to run your Insta for a week?
-- Qui tu laisserais choisir tes photos Tinder ? `hot:2 cerveau:1`
+- Qui tu laisserais choisir tes photos Tinder ? `hot:2 cerveau:1` #celib
   en: Who would you let pick your Tinder pics?
 - Qui tu laisserais jamais toucher à ton téléphone ? `toxique:2 coeur:-1`
   en: Who would you never let touch your phone?
@@ -703,21 +732,21 @@ Ce fichier contient toutes les questions intégrées. Le serveur le lit à chaqu
   en: Who'd never admit they're wrong, even with the proof right in front of them?
 - Qui ramènerait toujours tout à lui ? `toxique:3`
   en: Who'd always make everything about themselves?
-- Qui raconterait ses exploits sportifs d’il y a dix ans comme si c’était hier ? `genance:3`
+- Qui raconterait ses exploits sportifs d’il y a dix ans comme si c’était hier ? `genance:3` #sport
   en: Who'd brag about their sports glory days from ten years ago like it was yesterday?
-- Qui se prendrait pour un coach dès qu’il touche un ballon ? `genance:2 toxique:1`
+- Qui se prendrait pour un coach dès qu’il touche un ballon ? `genance:2 toxique:1` #sport
   en: Who'd think they're a coach the second they touch a ball?
-- Qui se blesserait en voulant impressionner tout le monde au foot ? `genance:2 chaos:1 cerveau:-1`
+- Qui se blesserait en voulant impressionner tout le monde au foot ? `genance:2 chaos:1 cerveau:-1` #sport
   en: Who'd get hurt trying to impress everyone at soccer?
 - Qui se croirait plus intelligent que tout le monde ici ? `toxique:2 genance:1`
   en: Who'd think they're smarter than everyone here?
 - Qui gagnerait un quiz de culture générale ? `cerveau:3`
   en: Who'd win a general trivia quiz?
-- Qui péterait un câble en perdant au beer-pong ? `exces:2 toxique:2`
+- Qui péterait un câble en perdant au beer-pong ? `exces:2 toxique:2` #alcool
   en: Who'd totally lose it after losing at beer pong?
 - Qui transformerait un simple bowling en guerre froide ? `chaos:2 toxique:2`
   en: Who'd turn a chill bowling night into a cold war?
-- Qui quitterait une partie de jeu vidéo en rage ? `chaos:2 toxique:1`
+- Qui quitterait une partie de jeu vidéo en rage ? `chaos:2 toxique:1` #gaming
   en: Who'd rage quit a video game?
 - Qui serait prêt à perdre un pote pour gagner un jeu ? `toxique:2 coeur:-2`
   en: Who'd be ready to lose a friend just to win a game?
@@ -729,7 +758,7 @@ Ce fichier contient toutes les questions intégrées. Le serveur le lit à chaqu
   en: Who'd get the biggest head if they got famous?
 - Qui perdrait tout le temps en disant que « le jeu est nul » ? `genance:2 toxique:1 cerveau:-1`
   en: Who'd lose all the time and say "this game sucks"?
-- Qui boirait plus que tout le monde juste pour prouver quelque chose ? `exces:3 chaos:1`
+- Qui boirait plus que tout le monde juste pour prouver quelque chose ? `exces:3 chaos:1` #alcool
   en: Who'd drink more than everyone just to prove something?
 - Qui deviendrait insupportable s’il gagnait au Loto ? `toxique:2 exces:2`
   en: Who'd become unbearable if they won the lottery?
@@ -737,7 +766,7 @@ Ce fichier contient toutes les questions intégrées. Le serveur le lit à chaqu
   en: Who'd correct everyone's spelling in the group chat?
 - Qui s’entraînerait en secret pour nous battre au prochain tournoi ? `cerveau:1 genance:2`
   en: Who'd secretly train to beat us at the next tournament?
-- Qui publierait son temps de course sur Strava chaque matin ? `genance:2 hot:1`
+- Qui publierait son temps de course sur Strava chaque matin ? `genance:2 hot:1` #sport
   en: Who'd post their run time on Strava every morning?
 - Qui aurait toujours une histoire encore plus folle que la tienne ? `toxique:2`
   en: Who'd always have a story even crazier than yours?
@@ -749,18 +778,26 @@ Ce fichier contient toutes les questions intégrées. Le serveur le lit à chaqu
   en: Who'd win a fight against the whole group?
 - Qui serait le plus beau joueur ? `coeur:2 cerveau:1`
   en: Who'd be the best sport?
-- Qui penserait pouvoir battre un pro dans son propre sport ? `genance:2 cerveau:-2`
+- Qui penserait pouvoir battre un pro dans son propre sport ? `genance:2 cerveau:-2` #sport
   en: Who'd think they could beat a pro at their own sport?
 - Qui voterait pour lui-même à ce jeu ? `toxique:2`
   en: Who'd vote for themselves in this game?
-- Qui tu choisirais en premier dans ton équipe au foot ? `hot:1`
+- Qui tu choisirais en premier dans ton équipe au foot ? `hot:1` #sport
   en: Who would you pick first for your soccer team?
 - Avec qui tu ferais équipe pour gagner au Pictionary ? `cerveau:2`
   en: Who would you team up with to win at Pictionary?
 - Qui tu voudrais jamais avoir comme adversaire au Monopoly ? `toxique:2 cerveau:1`
   en: Who would you never want to play against at Monopoly?
-- Qui tu choisirais comme coach pour te remettre en forme ? `cerveau:1 hot:2`
+- Qui tu choisirais comme coach pour te remettre en forme ? `cerveau:1 hot:2` #sport
   en: Who would you pick as your coach to get back in shape?
+- Qui irait à la salle juste pour les selfies dans le miroir ? `genance:2 hot:1` #sport
+  en: Who’d go to the gym just for mirror selfies?
+- Qui parlerait de ses records à la salle à chaque repas ? `genance:2` #sport
+  en: Who’d bring up their gym PRs at every meal?
+- Qui abandonnerait son abonnement à la salle au bout d’une semaine ? `genance:1 exces:-1` #sport
+  en: Who’d give up their gym membership after a week?
+- Qui serait l’arbitre le plus de mauvaise foi d’un match entre potes ? `toxique:1 chaos:1` #sport
+  en: Who’d be the most biased ref in a match between mates?
 
 ## 🚔 Crime & Police
 <!-- id: crime -->
@@ -778,7 +815,7 @@ Ce fichier contient toutes les questions intégrées. Le serveur le lit à chaqu
   en: Who'd have the crappiest alibi?
 - Qui volerait un truc dans un magasin juste pour le frisson ? `toxique:2 chaos:1`
   en: Who'd steal something from a store just for the thrill?
-- Qui finirait en cellule de dégrisement ? `exces:3 chaos:2`
+- Qui finirait en cellule de dégrisement ? `exces:3 chaos:2` #alcool
   en: Who'd end up in the drunk tank?
 - Qui serait le plus doué pour s’évader de prison ? `cerveau:2 chaos:2`
   en: Who'd be the best at breaking out of prison?
@@ -814,7 +851,7 @@ Ce fichier contient toutes les questions intégrées. Le serveur le lit à chaqu
   en: Who'd end up in a Netflix doc about scammers?
 - Qui se ferait arnaquer par un faux conseiller bancaire au téléphone ? `cerveau:-2 genance:2`
   en: Who'd get scammed over the phone by a fake bank guy?
-- Qui conduirait comme s’il avait déjà perdu tous ses points ? `chaos:2 exces:1`
+- Qui conduirait comme s’il avait déjà perdu tous ses points ? `chaos:2 exces:1` #voiture
   en: Who'd drive like they've already lost their license?
 - Qui essaierait de draguer le gendarme pour éviter son PV ? `hot:2 chaos:2`
   en: Who'd try to flirt with the cop to get out of a ticket?
@@ -978,6 +1015,14 @@ Ce fichier contient toutes les questions intégrées. Le serveur le lit à chaqu
   en: Who would you ask for advice on a big decision?
 - Sur qui tu pourrais compter à 4h du matin ? `coeur:3`
   en: Who could you count on at 4am?
+- Qui est le pilier du groupe ? `coeur:3`
+  en: Who holds the group together?
+- Qui donne les meilleurs conseils ? `coeur:2 cerveau:1`
+  en: Who gives the best advice?
+- Qui a le plus changé depuis qu’on se connaît ? `coeur:1`
+  en: Who’s changed the most since we met?
+- Qui ferait le meilleur prof ? `cerveau:2 coeur:1`
+  en: Who’d make the best teacher?
 
 ## 🧩 Traits & Manies
 <!-- id: traits -->
@@ -1049,6 +1094,77 @@ Ce fichier contient toutes les questions intégrées. Le serveur le lit à chaqu
   en: Who would you call to cheer you up?
 - Qui tu choisirais pour te réveiller le matin ? `chaos:-2 cerveau:1`
   en: Who would you pick to wake you up in the morning?
+- Qui a un avis sur tout, même sur ce qu’il ne connaît pas ? `toxique:1 genance:1`
+  en: Who has an opinion on everything, even stuff they know nothing about?
+
+## 🤓 Geek & Culture
+<!-- id: geek -->
+<!-- en: Geek & Culture -->
+> Jeux vidéo, séries, ordis et culture G.
+> en: Video games, TV shows, computers and trivia.
+
+- Qui pourrait réciter une série entière par cœur ? `genance:1 cerveau:1`
+  en: Who could recite an entire TV series by heart?
+- Qui passerait une nuit blanche pour finir un jeu vidéo ? `exces:1 chaos:1` #gaming
+  en: Who’d pull an all-nighter to finish a video game?
+- Qui expliquerait le lore d’un jeu pendant 45 minutes sans qu’on lui demande ? `genance:2 cerveau:1` #gaming
+  en: Who’d explain a game’s lore for 45 minutes without being asked?
+- Qui aurait le PC gamer le plus cher pour jouer à Minecraft ? `exces:1 genance:1` #gaming
+  en: Who’d have the priciest gaming PC just to play Minecraft?
+- Qui balancerait sa manette après une défaite ? `toxique:1 chaos:2` #gaming
+  en: Who’d throw their controller after losing?
+- Qui insulterait des gamins de 12 ans en ligne ? `toxique:2 genance:1` #gaming
+  en: Who’d trash-talk 12-year-olds online?
+- Qui serait nul à un jeu tout en se disant « pro » ? `genance:2` #gaming
+  en: Who’d be terrible at a game while calling themselves a pro?
+- Qui ferait la queue le jour de la sortie d’une console ? `exces:2` #gaming
+  en: Who’d queue on launch day for a new console?
+- Qui finirait un jeu à 100 %, trophées compris ? `cerveau:1 exces:1` #gaming
+  en: Who’d finish a game 100%, every trophy included?
+- Qui se ferait bannir d’un serveur Discord ? `toxique:2 chaos:1`
+  en: Who’d get banned from a Discord server?
+- Qui lancerait un débat Star Wars contre Star Trek à 2h du mat ? `cerveau:1 genance:1`
+  en: Who’d start a Star Wars vs Star Trek debate at 2am?
+- Qui a déjà pleuré devant un anime ? `coeur:2 genance:1`
+  en: Who’s cried watching an anime?
+- Qui monterait son propre PC et en parlerait pendant des semaines ? `cerveau:2 genance:1`
+  en: Who’d build their own PC and talk about it for weeks?
+- Qui aurait plus de karma sur Reddit que d’amis ? `genance:2`
+  en: Who’d have more Reddit karma than friends?
+- Qui coderait une appli juste pour trancher un débat du groupe ? `cerveau:3`
+  en: Who’d code an app just to settle a group argument?
+- Qui irait à une convention en cosplay de la tête aux pieds ? `genance:2 chaos:1`
+  en: Who’d go to a convention in full cosplay?
+- Qui relèverait une erreur scientifique en plein film au cinéma ? `cerveau:2 toxique:1`
+  en: Who’d point out a scientific mistake in the middle of a film?
+- Qui ne se remettrait jamais d’un spoiler ? `genance:1 coeur:1`
+  en: Who’d never get over being spoiled?
+- Qui serait le maître du jeu le plus impitoyable dans un jeu de rôle ? `chaos:2 cerveau:1`
+  en: Who’d be the most ruthless game master in a tabletop RPG?
+- Qui demanderait à ChatGPT quoi répondre à son crush ? `genance:2`
+  en: Who’d ask ChatGPT what to text their crush?
+- Qui aurait 400 onglets ouverts sur son ordi ? `chaos:2`
+  en: Who’d have 400 tabs open on their laptop?
+- Qui lirait les conditions d’utilisation en entier ? `cerveau:2 genance:1`
+  en: Who’d actually read the terms and conditions?
+- Qui investirait dans la première start-up d’IA bidon venue ? `chaos:1 cerveau:-1`
+  en: Who’d invest in the first dodgy AI start-up going?
+- Qui aurait un avis tranché sur chaque langage de programmation ? `cerveau:2 toxique:1`
+  en: Who’d have strong opinions on every programming language?
+- Qui tiendrait un tableur de tous les films qu’il a vus ? `cerveau:1 genance:2`
+  en: Who’d keep a spreadsheet of every film they’ve seen?
+- Qui pourrait parler d’échecs toute une soirée ? `cerveau:2 genance:1`
+  en: Who could talk about chess all night?
+- Qui a la meilleure culture ciné du groupe ? `cerveau:2`
+  en: Who knows the most about films in the group?
+- Qui gagnerait à Qui veut gagner des millions ? `cerveau:3`
+  en: Who’d win Who Wants to Be a Millionaire?
+- Qui relirait les règles d’un jeu de société dix fois avant de jouer ? `cerveau:1 genance:1`
+  en: Who’d reread a board game’s rules ten times before playing?
+- Qui tu prendrais dans ton équipe pour un escape game ? `cerveau:2`
+  en: Who would you pick for your escape room team?
+- Qui tu appellerais pour réparer ton ordi ? `cerveau:2 coeur:1`
+  en: Who would you call to fix your computer?
 
 ## 🌶️ Pimenté · 18+
 <!-- id: pimente -->
@@ -1062,9 +1178,9 @@ Ce fichier contient toutes les questions intégrées. Le serveur le lit à chaqu
   en: Who'd be the best kisser?
 - Qui serait capable d’envoyer des nudes ce soir ? `hot:2 chaos:2`
   en: Who'd be down to send nudes tonight?
-- Qui draguerait le serveur ou la serveuse pour avoir un shot gratuit ? `hot:2 exces:1`
+- Qui draguerait le serveur ou la serveuse pour avoir un shot gratuit ? `hot:2 exces:1` #soiree
   en: Who'd flirt with the waiter or waitress to get a free shot?
-- Qui serait le plus partant pour embrasser quelqu’un de ce groupe ? `hot:2 chaos:1`
+- Qui serait le plus partant pour embrasser quelqu’un de ce groupe ? `hot:2 chaos:1` #mixte
   en: Who'd be the most down to kiss someone in this group?
 - Qui conclurait dès le premier date ? `hot:2 chaos:1`
   en: Who'd hook up on the first date?
@@ -1072,7 +1188,7 @@ Ce fichier contient toutes les questions intégrées. Le serveur le lit à chaqu
   en: Who'd have the worst pickup game?
 - Qui enverrait les textos les plus chauds ? `hot:3`
   en: Who'd send the hottest texts?
-- Qui serait le plus accro aux applis de rencontre ? `hot:2 exces:2`
+- Qui serait le plus accro aux applis de rencontre ? `hot:2 exces:2` #celib
   en: Who'd be the most hooked on dating apps?
 - Qui pourrait coucher avec quelqu’un sans connaître son prénom ? `hot:2 exces:2 chaos:1`
   en: Who could sleep with someone without even knowing their name?
@@ -1086,25 +1202,25 @@ Ce fichier contient toutes les questions intégrées. Le serveur le lit à chaqu
   en: Who'd have the flirtiest eyes?
 - Qui ferait semblant d’aimer un bisou horrible ? `genance:2 coeur:1`
   en: Who'd pretend to like a horrible kiss?
-- Qui pourrait craquer pour un prof ? `hot:1 chaos:1`
+- Qui pourrait craquer pour un prof ? `hot:1 chaos:1` #etudes
   en: Who could fall for a teacher?
 - Qui serait le plus partant pour un strip poker ? `hot:2 chaos:2`
   en: Who'd be the most down for strip poker?
-- Qui aurait le plus de crushs secrets dans ce groupe ? `hot:2 chaos:1`
+- Qui aurait le plus de crushs secrets dans ce groupe ? `hot:2 chaos:1` #mixte
   en: Who'd have the most secret crushes in this group?
 - Qui ferait le meilleur strip-tease ? `hot:3 chaos:1`
   en: Who'd do the best striptease?
 - Qui serait le plus maladroit au premier bisou ? `genance:3`
   en: Who'd be the most awkward at a first kiss?
-- Qui embrasserait plus de trois personnes dans la même soirée ? `hot:2 exces:2 chaos:1`
+- Qui embrasserait plus de trois personnes dans la même soirée ? `hot:2 exces:2 chaos:1` #soiree
   en: Who'd make out with more than three people in one night?
-- Qui se mettrait en couple avec quelqu’un rencontré en boîte la veille ? `chaos:2 hot:1 cerveau:-1`
+- Qui se mettrait en couple avec quelqu’un rencontré en boîte la veille ? `chaos:2 hot:1 cerveau:-1` #soiree
   en: Who'd get into a relationship with someone they met at the club the night before?
 - Qui aurait la voix la plus sexy ? `hot:3`
   en: Who'd have the sexiest voice?
 - Qui enverrait un message chaud à la mauvaise personne ? `genance:3 chaos:1 hot:1`
   en: Who'd send a dirty text to the wrong person?
-- Qui devrait cacher un suçon à ses parents ? `hot:2 genance:1`
+- Qui devrait cacher un suçon à ses parents ? `hot:2 genance:1` #parents
   en: Who'd have to hide a hickey from their parents?
 - Qui draguerait avec des blagues de beauf ? `genance:3 hot:-1`
   en: Who'd flirt using trashy dad jokes?
@@ -1116,13 +1232,13 @@ Ce fichier contient toutes les questions intégrées. Le serveur le lit à chaqu
   en: Who'd ditch a date halfway through?
 - Qui aurait l’air sage mais cacherait bien son jeu ? `hot:2 chaos:1`
   en: Who'd look all innocent but secretly be a whole other story?
-- Qui tu choisirais comme wingman en soirée ? `hot:2 coeur:1`
+- Qui tu choisirais comme wingman en soirée ? `hot:2 coeur:1` #soiree
   en: Who would you pick as your wingman on a night out?
 - À qui tu demanderais des conseils de drague ? `hot:3`
   en: Who would you ask for flirting tips?
 - Qui tu laisserais choisir ton date à l’aveugle ? `cerveau:1 coeur:1`
   en: Who would you let pick your blind date?
-- Qui tu embrasserais si tu devais choisir quelqu’un du groupe ? `hot:3`
+- Qui tu embrasserais si tu devais choisir quelqu’un du groupe ? `hot:3` #mixte
   en: Who would you kiss if you had to pick someone in the group?
 
 ## 🔥 Très hot · 18+
@@ -1189,7 +1305,7 @@ Ce fichier contient toutes les questions intégrées. Le serveur le lit à chaqu
   en: Who'd be the king or queen of foreplay?
 - Qui regarderait le plus de porno ? `exces:3 hot:1`
   en: Who'd watch the most porn?
-- Qui ferait du sexting en pleine réunion ? `hot:2 chaos:2`
+- Qui ferait du sexting en pleine réunion ? `hot:2 chaos:2` #travail
   en: Who'd be sexting in the middle of a meeting?
 - À qui tu demanderais des conseils au lit ? `hot:3`
   en: Who would you ask for sex tips?
@@ -1216,7 +1332,7 @@ Ce fichier contient toutes les questions intégrées. Le serveur le lit à chaqu
   en: Who'd sleep with a friend's ex without feeling guilty?
 - Qui finirait avec un sugar daddy ou une sugar mommy ? `hot:2 toxique:2`
   en: Who'd end up with a sugar daddy or a sugar mommy?
-- Qui coucherait avec son boss pour une promotion ? `toxique:3 hot:1`
+- Qui coucherait avec son boss pour une promotion ? `toxique:3 hot:1` #travail
   en: Who'd sleep with their boss for a promotion?
 - Qui accepterait d’être le plan caché de quelqu’un en couple ? `toxique:3 hot:2`
   en: Who'd be ok being the secret side piece of someone who's taken?
@@ -1226,7 +1342,7 @@ Ce fichier contient toutes les questions intégrées. Le serveur le lit à chaqu
   en: Who could juggle two relationships at the same time?
 - Qui fouillerait le téléphone de son mec ou de sa meuf ? `toxique:3`
   en: Who'd go through their bf's or gf's phone?
-- Qui aurait une aventure avec un collègue marié ? `toxique:2 hot:2 chaos:1`
+- Qui aurait une aventure avec un collègue marié ? `toxique:2 hot:2 chaos:1` #travail
   en: Who'd have an affair with a married coworker?
 - Qui ferait « une dernière fois » avec son ex… plusieurs fois ? `hot:2 genance:1 chaos:1`
   en: Who'd do it "one last time" with their ex... several times?
@@ -1236,7 +1352,7 @@ Ce fichier contient toutes les questions intégrées. Le serveur le lit à chaqu
   en: Who'd sleep with someone just to make their ex jealous?
 - Qui coucherait avec le frère ou la sœur d’un pote ? `hot:2 toxique:2 chaos:1`
   en: Who'd sleep with a friend's brother or sister?
-- Qui coucherait avec quelqu’un du groupe si personne ne le savait ? `hot:2 toxique:1 chaos:1`
+- Qui coucherait avec quelqu’un du groupe si personne ne le savait ? `hot:2 toxique:1 chaos:1` #mixte
   en: Who'd sleep with someone in the group if nobody ever found out?
 - Qui coucherait avec un inconnu pour un million ? `hot:2 toxique:1`
   en: Who'd sleep with a stranger for a million?
@@ -1270,7 +1386,7 @@ Ce fichier contient toutes les questions intégrées. Le serveur le lit à chaqu
   en: Who would you pick for a threesome?
 - À qui tu avouerais une tromperie en premier ? `coeur:2`
   en: Who would you confess cheating to first?
-- Qui tu laisserais jamais seul avec ton mec ou ta meuf ? `toxique:3 hot:2`
+- Qui tu laisserais jamais seul avec ton mec ou ta meuf ? `toxique:3 hot:2` #couple
   en: Who would you never leave alone with your bf or gf?
-- À qui tu demanderais de mentir pour toi à ton mec ou ta meuf ? `toxique:1 coeur:1 cerveau:1`
+- À qui tu demanderais de mentir pour toi à ton mec ou ta meuf ? `toxique:1 coeur:1 cerveau:1` #couple
   en: Who would you ask to lie to your bf or gf for you?

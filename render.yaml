@@ -15,3 +15,5 @@ services:
         sync: false
       - key: GIPHY_API_KEY # clé gratuite sur developers.giphy.com (ou TENOR_API_KEY à la place)
         sync: false
+      - key: OWNER_USERNAME # ton identifiant dans l’app : tu reçois les bugs / avis envoyés par les gens
+        sync: false
