@@ -660,7 +660,9 @@
     lobbyTimer = null;
   }
 
-  const removeFab = () => document.querySelectorAll('body > .fab').forEach((x) => x.remove());
+  // Éléments fixes posés hors de #view (bouton +, flèches des sous-onglets de Stats) : #view bouge pendant un
+  // glissement et les emporterait. Chaque écran recrée les siens.
+  const removeFab = () => document.querySelectorAll('body > .fab, body > .edge-nav').forEach((x) => x.remove());
 
   function renderLobby() {
     removeFab();
@@ -2288,12 +2290,38 @@
       ${strip}
       ${statsMode === 'duo' ? statsDuo(pid) : statsMode === 'group' ? statsGroup() : statsProfile(pid)}`;
     view.querySelectorAll('[data-player]').forEach((b) => (b.onclick = () => { statsPlayer = b.dataset.player; renderView(); }));
-    view.querySelectorAll('[data-smode]').forEach((b) => (b.onclick = () => { statsMode = b.dataset.smode; save('statsMode', statsMode); renderView(); }));
+    view.querySelectorAll('[data-smode]').forEach((b) => (b.onclick = () => setStatsMode(b.dataset.smode)));
+    statsArrows();
     view.querySelectorAll('[data-goto]').forEach((b) => (b.onclick = () => { statsPlayer = b.dataset.goto; renderView(); window.scrollTo({ top: 0, behavior: 'smooth' }); }));
     view.querySelectorAll('[data-recap]').forEach((b) => (b.onclick = () => openRecap(b.dataset.recap)));
     view.querySelectorAll('[data-recapsall]').forEach((b) => (b.onclick = () => { recapsAll = !recapsAll; renderView(); }));
     const sc = document.getElementById('streakCard');
     if (sc) sc.onclick = () => openStreakSheet();
+  }
+
+  // Sous-onglets de Stats (Profil, Affinités, Groupe) : pas de glissement entre eux (le glissement passe aux onglets
+  // voisins), mais deux flèches sur les bords de l'écran, en plus des boutons en haut.
+  const STATS_MODES = ['me', 'duo', 'group'];
+  function setStatsMode(m) {
+    if (!STATS_MODES.includes(m) || m === statsMode) return;
+    statsMode = m;
+    save('statsMode', m);
+    renderView();
+    window.scrollTo({ top: 0 });
+  }
+  function statsArrows() {
+    const i = Math.max(0, STATS_MODES.indexOf(statsMode));
+    const label = { me: T('Profil', 'Profile', 'Perfil'), duo: T('Affinités', 'Duos', 'Afinidades'), group: T('Groupe', 'Group', 'Grupo') };
+    for (const [dir, to] of [['prev', STATS_MODES[i - 1]], ['next', STATS_MODES[i + 1]]]) {
+      if (!to) continue;
+      const b = document.createElement('button');
+      b.className = `edge-nav ${dir}`;
+      b.setAttribute('aria-label', label[to]);
+      b.title = label[to];
+      b.innerHTML = `${icon('down')}<span>${esc(label[to])}</span>`;
+      b.onclick = () => setStatsMode(to);
+      document.body.appendChild(b);
+    }
   }
 
   function statsProfile(pid) {
@@ -2593,13 +2621,26 @@
 
   // ---------- Quiz : questionnaire de profil (si l'admin l'a activé) ----------
   let quizData = null; // { items, mine, summary, effects }
+  // Thèmes des questions (étiquettes de questions.md), tels qu'affichés dans le résumé du questionnaire :
+  // on parle des QUESTIONS, pas des gens (« questions spécial mecs », pas « les mecs »).
   const TAG_LABELS = {
-    alcool: ['l’alcool', 'drinking', 'el alcohol'], soiree: ['les soirées', 'nights out', 'las fiestas'], couple: ['le couple', 'relationships', 'la pareja'],
-    celib: ['la vie de célib', 'single life', 'la vida de soltero'], etudes: ['les études', 'studying', 'los estudios'], travail: ['le boulot', 'work', 'el curro'],
-    gaming: ['les jeux vidéo', 'gaming', 'los videojuegos'], sport: ['le sport', 'sport', 'el deporte'], voiture: ['la conduite', 'driving', 'conducir'],
-    coloc: ['la coloc', 'flatshares', 'el piso compartido'], parents: ['vivre chez ses parents', 'living with your parents', 'vivir con tus padres'], enfants: ['les enfants', 'kids', 'los hijos'],
-    homme: ['les mecs', 'guys', 'los tíos'], femme: ['les filles', 'girls', 'las chicas'], jeune: ['les plus jeunes', 'the youngest', 'los más jóvenes'], adulte: ['les plus âgés', 'the oldest', 'los mayores'],
-    mixte: ['les groupes mixtes', 'mixed groups', 'los grupos mixtos'],
+    alcool: ['alcool', 'drinking', 'alcohol'],
+    soiree: ['soirées', 'nights out', 'fiesta'],
+    couple: ['couple', 'relationships', 'pareja'],
+    celib: ['vie de célib', 'single life', 'vida de soltero'],
+    etudes: ['études', 'studying', 'estudios'],
+    travail: ['boulot', 'work', 'curro'],
+    gaming: ['jeux vidéo', 'gaming', 'videojuegos'],
+    sport: ['sport', 'sport', 'deporte'],
+    voiture: ['conduite', 'driving', 'conducir'],
+    coloc: ['coloc', 'flatshares', 'piso compartido'],
+    parents: ['vivre chez ses parents', 'living with your parents', 'vivir con tus padres'],
+    enfants: ['enfants', 'kids', 'hijos'],
+    homme: ['questions spécial mecs', 'questions just for guys', 'preguntas solo para chicos'],
+    femme: ['questions spécial filles', 'questions just for girls', 'preguntas solo para chicas'],
+    jeune: ['questions 18-25 ans', 'questions for 18-25s', 'preguntas para 18-25 años'],
+    adulte: ['questions 26 ans et +', 'questions for over-25s', 'preguntas para mayores de 25'],
+    mixte: ['questions de groupe mixte', 'questions for mixed groups', 'preguntas para grupos mixtos'],
   };
 
   async function renderQuiz(view) {
@@ -2633,8 +2674,8 @@
       <div class="card">
         <div class="card-title">${T('Le groupe', 'The group', 'El grupo')} <span class="muted small">· ${T(`${sum.answered}/${sum.members} ont répondu`, `${sum.answered}/${sum.members} answered`, `${sum.answered}/${sum.members} han respondido`)}</span></div>
         ${sum.answered < 3 ? `<p class="muted small" style="margin:0">${T('Le résumé du groupe apparaît à partir de 3 réponses (pour que personne ne soit reconnu).', 'The group summary shows up from 3 answers (so nobody can be recognised).', 'El resumen del grupo sale a partir de 3 respuestas (para que no se sepa quién es quién).')}</p>` : ''}
-        ${more.length ? `<p class="small" style="margin:6px 0 0">⬆️ ${T('Plus souvent : ', 'More often: ', 'Más a menudo: ')}${more.map(esc).join(', ')}</p>` : ''}
-        ${less.length ? `<p class="small" style="margin:6px 0 0">⬇️ ${T('Moins souvent : ', 'Less often: ', 'Menos a menudo: ')}${less.map(esc).join(', ')}</p>` : ''}
+        ${more.length ? `<p class="small" style="margin:6px 0 0">⬆️ ${T('Questions qui tomberont plus souvent : ', 'Questions coming up more often: ', 'Preguntas que saldrán más: ')}${more.map(esc).join(', ')}</p>` : ''}
+        ${less.length ? `<p class="small" style="margin:6px 0 0">⬇️ ${T('Questions qui tomberont moins souvent : ', 'Questions coming up less often: ', 'Preguntas que saldrán menos: ')}${less.map(esc).join(', ')}</p>` : ''}
         ${!more.length && !less.length ? `<p class="muted small" style="margin:6px 0 0">${T('Pas encore assez de réponses pour changer les questions.', 'Not enough answers yet to change the questions.', 'Aún no hay suficientes respuestas para cambiar las preguntas.')}</p>` : ''}
         ${state.me.isAdmin ? quizAdminCard() : ''}
       </div>`;
@@ -3043,22 +3084,21 @@
   }
 
   // ---------- Glisser pour changer d'onglet ----------
-  // Sur l'écran principal, glisser à gauche / à droite passe à la page voisine : les sous-onglets d'abord
-  // (En cours ↔ Archives, Profil ↔ Affinités ↔ Groupe), puis les onglets du menu.
+  // Sur l'écran principal, glisser à gauche / à droite passe à la page voisine : En cours ↔ Archives, puis les
+  // onglets du menu. Les sous-onglets de Stats ne se glissent pas (flèches sur les bords à la place).
   function pages() {
-    const list = [['live', 'live'], ['live', 'archive'], ['chat'], ['sets'], ['stats', 'me'], ['stats', 'duo'], ['stats', 'group']];
+    const list = [['live', 'live'], ['live', 'archive'], ['chat'], ['sets'], ['stats']]; // Stats : sous-onglets par les flèches
     if (state.settings.profiles) list.push(['quiz']);
     list.push(['me']);
     return list;
   }
   function pageIndex() {
-    const sub = tab === 'live' ? liveMode : tab === 'stats' ? statsMode : undefined;
+    const sub = tab === 'live' ? liveMode : undefined;
     return pages().findIndex(([t, m]) => t === tab && (m === undefined || m === sub));
   }
   function goPage(i) {
     const [t, m] = pages()[i];
     if (t === 'live') { liveMode = m; save('liveMode', m); }
-    if (t === 'stats') { statsMode = m; save('statsMode', m); }
     if (t === 'sets') openSet = null;
     if (t === tab) { openPolls.clear(); renderView(); window.scrollTo({ top: 0 }); } else go(t);
   }

@@ -2628,3 +2628,38 @@ html:has(body.noscroll) { overflow: hidden; }
 /* Glisser pour changer d'onglet : la zone ne laisse au navigateur que le défilement vertical
    (sinon il « prend » le geste dès qu'il est un peu en diagonale). */
 #view { touch-action: pan-y pinch-zoom; }
+
+/* Stats : flèches sur les bords pour passer d'un sous-onglet à l'autre (Profil ↔ Affinités ↔ Groupe) */
+.edge-nav {
+  position: fixed;
+  top: 50%;
+  z-index: 9;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 44px;
+  padding: 0 8px 0 4px;
+  border-radius: 0 22px 22px 0;
+  background: color-mix(in srgb, var(--card) 88%, transparent);
+  border: 1px solid var(--border);
+  border-left: 0;
+  color: var(--accent-text);
+  font-weight: 700;
+  font-size: 0.72rem;
+  box-shadow: var(--shadow);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  transform: translateY(-50%);
+  animation: fade 0.25s;
+}
+.edge-nav.prev { left: 0; }
+.edge-nav.next { right: 0; flex-direction: row-reverse; padding: 0 4px 0 8px; border-radius: 22px 0 0 22px; border-left: 1px solid var(--border); border-right: 0; }
+.edge-nav .ico-svg { width: 20px; height: 20px; flex-shrink: 0; }
+.edge-nav.prev .ico-svg { transform: rotate(90deg); }
+.edge-nav.next .ico-svg { transform: rotate(-90deg); }
+/* Le nom du sous-onglet ne s'affiche que s'il y a la place (pas par-dessus les cartes sur téléphone) */
+.edge-nav span { display: none; }
+@media (min-width: 760px) { .edge-nav span { display: inline; } }
+.edge-nav:active { transform: translateY(-50%) scale(0.94); }
+.edge-nav { color: var(--accent); }
+.edge-nav .ico-svg { width: 22px; height: 22px; stroke-width: 2.8; }
