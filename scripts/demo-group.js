@@ -1,5 +1,5 @@
 // Groupe de démo pour la relecture App Store / Google Play (le relecteur le rejoint avec son code).
-//   node scripts/demo-group.js https://qui-de-nous.onrender.com
+//   node scripts/demo-group.js https://qui-de-nous-bpbr.onrender.com
 // 1re fois : crée le groupe et 7 faux membres (tokens gardés dans data/demo-group.json, jamais publié).
 // Chaque lancement : fait tomber 2 questions, les faux membres votent et discutent un peu.
 // À relancer la veille de chaque envoi en relecture, pour que le groupe ait des questions en cours.

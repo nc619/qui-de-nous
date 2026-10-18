@@ -20,12 +20,12 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
-            <!-- Liens d'invitation (https://qui-de-nous.onrender.com/?code=…) qui ouvrent directement l'app -->
+            <!-- Liens d'invitation (https://<serveur>/?code=…) qui ouvrent directement l'app -->
             <intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="https" android:host="qui-de-nous.onrender.com" />
+                <data android:scheme="https" android:host="qui-de-nous-bpbr.onrender.com" />
             </intent-filter>
         </activity>
 

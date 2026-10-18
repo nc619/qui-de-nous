@@ -59,10 +59,10 @@ Render → your service → **Environment**:
 | `ANDROID_PACKAGE` | the app ID |
 | `ANDROID_SHA256` | Play Console → your app → Test and release → **App integrity** → *App signing key certificate* → SHA-256 (after step 5.2) |
 
-Check: [/privacy](https://qui-de-nous.onrender.com/privacy), [/terms](https://qui-de-nous.onrender.com/terms),
-[/support](https://qui-de-nous.onrender.com/support) (+ `/en/…`), later
-[/.well-known/apple-app-site-association](https://qui-de-nous.onrender.com/.well-known/apple-app-site-association)
-and [/.well-known/assetlinks.json](https://qui-de-nous.onrender.com/.well-known/assetlinks.json).
+Check: [/privacy](https://qui-de-nous-bpbr.onrender.com/privacy), [/terms](https://qui-de-nous-bpbr.onrender.com/terms),
+[/support](https://qui-de-nous-bpbr.onrender.com/support) (+ `/en/…`), later
+[/.well-known/apple-app-site-association](https://qui-de-nous-bpbr.onrender.com/.well-known/apple-app-site-association)
+and [/.well-known/assetlinks.json](https://qui-de-nous-bpbr.onrender.com/.well-known/assetlinks.json).
 
 Make sure the service is on a paid plan (Starter): on the free plan the server sleeps, so no notifications and no
 scheduled questions.
@@ -139,9 +139,9 @@ Everything to paste is below (texts) and in `store-assets/` (images).
 
 | Field | Value |
 |---|---|
-| Privacy policy URL | `https://qui-de-nous.onrender.com/privacy` (English listing: `/en/privacy`) |
-| Support URL (Apple) | `https://qui-de-nous.onrender.com/support` (`/en/support`) |
-| Marketing URL (Apple, optional) | `https://qui-de-nous.onrender.com` |
+| Privacy policy URL | `https://qui-de-nous-bpbr.onrender.com/privacy` (English listing: `/en/privacy`) |
+| Support URL (Apple) | `https://qui-de-nous-bpbr.onrender.com/support` (`/en/support`) |
+| Marketing URL (Apple, optional) | `https://qui-de-nous-bpbr.onrender.com` |
 | Category | Apple: *Games → Trivia* (secondary *Social Networking*); Google: *Game → Trivia* |
 | Price | Free, no in-app purchases, no ads |
 | iPhone screenshots | `store-assets/screenshots/{fr,en}/ios/*.png` (1320×2868 = the 6.9" size; Apple scales it for the others) |
@@ -158,12 +158,12 @@ sets) · *Alcohol, tobacco, or drug use or references*: Frequent · *Violence*: 
 content = yes, crude humor = yes, sexual references in text = yes, references to alcohol/drugs = yes, no gambling,
 no violence beyond cartoon. **Target audience**: 18+ only (keeps you out of the Families policy). **Ads**: no.
 **Data safety**: see "Privacy answers" below (data encrypted in transit, users can delete their account in the app:
-deletion URL = `https://qui-de-nous.onrender.com/support`).
+deletion URL = `https://qui-de-nous-bpbr.onrender.com/support`).
 
 ## 7. Submit for review
 
 1. Create the reviewers' demo group (run it from your PC, again the day before each submission):
-   `node scripts/demo-group.js https://qui-de-nous.onrender.com` → it prints a code → put it in the review notes
+   `node scripts/demo-group.js https://qui-de-nous-bpbr.onrender.com` → it prints a code → put it in the review notes
    below (replace **XXXXXX**). It creates a "Demo" group with 7 fake members who vote and chat; the name **Kim** is
    left free for the reviewer.
 2. Apple: App Store Connect → your app → *iOS App 1.0* → pick the TestFlight build → paste texts + notes → *Add for

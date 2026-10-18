@@ -6,7 +6,7 @@
 	<string>development</string>
 	<key>com.apple.developer.associated-domains</key>
 	<array>
-		<string>applinks:qui-de-nous.onrender.com</string>
+		<string>applinks:qui-de-nous-bpbr.onrender.com</string>
 	</array>
 </dict>
 </plist>
