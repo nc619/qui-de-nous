@@ -1,0 +1,32 @@
+{
+  "name": "qui-de-nous-mobile",
+  "version": "1.0.0",
+  "private": true,
+  "description": "App iOS / Android (Capacitor) : la même interface que le site, avec notifications natives.",
+  "scripts": {
+    "build": "node build.js",
+    "sync": "node build.js && cap sync",
+    "android": "node build.js && cap sync android && cap open android",
+    "ios": "node build.js && cap sync ios && cap open ios",
+    "assets": "capacitor-assets generate --iconBackgroundColor \"#7b2ff7\" --iconBackgroundColorDark \"#0b0614\" --splashBackgroundColor \"#7b2ff7\" --splashBackgroundColorDark \"#0b0614\"",
+    "ios:release": "node build.js --bump && cap sync ios && cap open ios",
+    "android:release": "node build.js --bump && cap sync android && cap open android"
+  },
+  "dependencies": {
+    "@capacitor-firebase/messaging": "^8.0.0",
+    "@capacitor/android": "^8.0.0",
+    "@capacitor/app": "^8.0.0",
+    "@capacitor/core": "^8.0.0",
+    "@capacitor/haptics": "^8.0.0",
+    "@capacitor/ios": "^8.0.0",
+    "@capacitor/share": "^8.0.0",
+    "@capacitor/splash-screen": "^8.0.0",
+    "@capacitor/status-bar": "^8.0.0",
+    "@capawesome/capacitor-badge": "^8.0.0",
+    "firebase": "^12.6.0"
+  },
+  "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
+    "@capacitor/cli": "^8.0.0"
+  }
+}

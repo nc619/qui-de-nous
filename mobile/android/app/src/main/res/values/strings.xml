@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Whomst</string>
+    <string name="title_activity_main">Whomst</string>
+    <string name="package_name">com.whomst.app</string>
+    <string name="custom_url_scheme">com.whomst.app</string>
+</resources>

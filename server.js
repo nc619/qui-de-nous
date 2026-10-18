@@ -3,7 +3,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { store, load, persist, flush, newGroup, newCode, MIN_INTERVAL } = require('./lib/store');
+const { store, load, persist, flush, scope, setScopeGroup, newGroup, newCode, MIN_INTERVAL } = require('./lib/store');
 const { latestSlot, nextSlot, isValidTimezone, zonedParts, zonedToUtc, dayShift } = require('./lib/schedule');
 const { STATS, parseWeights, computeStats, computeAffinity, computeGroup, ballot, tally } = require('./lib/stats');
 const push = require('./lib/push');
@@ -18,6 +18,7 @@ const profile = require('./lib/profile');
 const streaks = require('./lib/streaks');
 const recap = require('./lib/recap');
 const changelog = require('./lib/changelog');
+const legal = require('./lib/legal');
 
 // Le compte du développeur (variable OWNER_USERNAME sur Render) : reçoit les avis / bugs signalés.
 const isOwner = (account) => !!process.env.OWNER_USERNAME && !!account.username && account.username.toLowerCase() === process.env.OWNER_USERNAME.toLowerCase();
@@ -33,7 +34,7 @@ const WORDS = new Set([
   'sets', 'questions', 'push', 'subscribe', 'unsubscribe', 'admin', 'players', 'reset', 'settings', 'drop-auto',
   'unscored', 'scores', 'group', 'code', 'chat', 'read', 'typing', 'events', 'gifs', 'messages', 'presence', 'test', 'react', 'photos', 'photo',
   'images', 'image', 'rate', 'ratings', 'account', 'accounts', 'recover', 'recovery', 'link',
-  'claim', 'claims', 'approve', 'deny', 'cancel', 'quiz', 'recap', 'changelog', 'feedback',
+  'claim', 'claims', 'approve', 'deny', 'cancel', 'quiz', 'recap', 'changelog', 'feedback', 'report', 'block', 'leave', 'delete', 'owner', 'ban', 'done',
 ]);
 
 // Petit raccourci pour les textes envoyés aux gens (notifications) : français ou anglais selon leur réglage.
@@ -224,6 +225,41 @@ function claimPlayer(g, account, playerId, name) {
   ensureUsername(account, player.name);
   persist();
   return user;
+}
+
+// ---------- Quitter un groupe, supprimer son compte ----------
+// Quitter : le nom redevient libre dans le groupe (les votes et messages restent, comme avec la 🗑️ de l'admin).
+// Un admin qui part passe la main au plus ancien membre restant.
+function leaveGroup(g, user) {
+  const player = g.players[user.playerId];
+  if (user.isAdmin) {
+    user.isAdmin = false;
+    const next = Object.values(g.users)
+      .filter((u) => u.id !== user.id && !u.disabled && u.playerId && g.players[u.playerId])
+      .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0))[0];
+    if (next && !Object.values(g.users).some((u) => u.isAdmin && !u.disabled && u.id !== user.id)) next.isAdmin = true;
+  }
+  user.disabled = true;
+  delete user.pinHash;
+  delete g.pushSubs[user.id];
+  if (g.profiles) delete g.profiles[user.id];
+  if (player && player.userId === user.id) player.userId = null;
+  persist(g);
+  live.emit(g.id, 'refresh', {});
+}
+
+async function deleteAccount(account) {
+  for (const { g, user } of membersOf(account)) {
+    const player = g.players[user.playerId];
+    leaveGroup(g, user);
+    if (player && player.photo) {
+      await photos.remove(player.id).catch(() => {});
+      delete player.photo;
+    }
+  }
+  for (const [t, s] of Object.entries(store.db.sessions)) if (s.accountId === account.id) delete store.db.sessions[t];
+  delete store.db.accounts[account.id];
+  persist();
 }
 
 // ---------- Récupérer son nom (compte perdu) ----------
@@ -578,13 +614,14 @@ function notifyChat(g, me, channel, msg) {
   };
   const where = (u) => (channel === 'general' ? tr(u.lang, 'Chat du groupe', 'Group chat') : short(pollText(g, g.polls[channel], u.lang), 60));
   const wantsMention = (u) => special.has(u.id) && push.prefs(u).mentions;
-  push.notify(g, 'chat', (u) => (wantsMention(u) ? null : {
+  const blocked = (u) => (u.blocked || []).includes(me.playerId);
+  push.notify(g, 'chat', (u) => (wantsMention(u) || blocked(u) ? null : {
     title: `${author.name} · ${where(u)}`,
     body: what(u),
     tag: 'chat-' + channel,
     url: `/?chat=${channel}`,
   }), me.id);
-  push.notify(g, 'mentions', (u) => (!special.has(u.id) ? null : {
+  push.notify(g, 'mentions', (u) => (!special.has(u.id) || blocked(u) ? null : {
     title: (msg.mentions || []).includes(u.id)
       ? tr(u.lang, `${author.name} t’a tagué·e · ${where(u)}`, `${author.name} tagged you · ${where(u)}`)
       : tr(u.lang, `${author.name} t’a répondu · ${where(u)}`, `${author.name} replied to you · ${where(u)}`),
@@ -644,10 +681,11 @@ function stateFor(g, me, now) {
   return {
     now,
     group: { id: g.id, name: g.name, code: g.code },
-    me: { userId: me.id, playerId: me.playerId, isAdmin: !!me.isAdmin, notif: push.prefs(me), dropsLeft: dropsLeft(g, me.id, now), dropsPerDay: dropsPerDay(g), dropsResetAt: nextMidnight(g, now), lang: me.lang || null, quizDone: !!((g.profiles || {})[me.id] && Object.keys(g.profiles[me.id].answers || {}).length) },
+    me: { userId: me.id, playerId: me.playerId, isAdmin: !!me.isAdmin, blocked: me.blocked || [], notif: push.prefs(me), dropsLeft: dropsLeft(g, me.id, now), dropsPerDay: dropsPerDay(g), dropsResetAt: nextMidnight(g, now), lang: me.lang || null, quizDone: !!((g.profiles || {})[me.id] && Object.keys(g.profiles[me.id].answers || {}).length) },
     colors: COLORS,
     players: Object.values(g.players).sort((a, b) => a.createdAt - b.createdAt).map((p) => publicPlayer(p, g)),
     sets: Object.values(g.sets)
+      .filter((s) => g.settings.spicy !== false || !s.spicy)
       .sort((a, b) => (a.spicy - b.spicy) || (b.builtin - a.builtin) || ((a.order ?? 0) - (b.order ?? 0)) || a.createdAt - b.createdAt)
       .map((s) => game.setView(g, s, me)),
     live: livePolls.map((p) => pv(g, p, me, now)),
@@ -887,38 +925,54 @@ async function api(req, res, url) {
       if (text.length < 3) throw new HttpError(400, 'Écris quelques mots', 'Write a few words');
       if (text.length > 2000) throw new HttpError(400, 'Trop long (2000 caractères max)', 'Too long (2000 characters max)');
       checkSendRate('fb:' + account.id);
-      const g = body.groupId && db.groups[body.groupId];
-      const m = g && memberIn(g, account);
-      const item = {
-        id: newId(),
-        at: now,
-        kind: ['bug', 'idea', 'other'].includes(body.kind) ? body.kind : 'other',
-        text,
-        username: account.username || null,
-        group: g ? g.name : null,
-        name: m ? g.players[m.playerId]?.name || null : null,
-        lang: account.lang || null,
-        ua: String(req.headers['user-agent'] || '').slice(0, 200),
-        version: changelog.latest().id,
-      };
-      db.feedback = [item, ...(db.feedback || [])].slice(0, 500);
-      persist();
-      const owner = Object.values(db.accounts).find(isOwner);
-      const om = owner && owner.id !== account.id && membersOf(owner).find(({ g: og, user }) => (og.pushSubs[user.id] || []).length);
-      if (om) {
-        push.sendTo(om.g, om.user.id, {
-          title: `${{ bug: '🐞', idea: '💡', other: '💬' }[item.kind]} ${item.name || item.username || '?'}${item.group ? ' · ' + item.group : ''}`,
-          body: short(text, 160),
-          tag: 'feedback-' + item.id,
-          url: '/?feedback=1',
-        }).catch(() => {});
+      addFeedback(req, account, body.groupId && db.groups[body.groupId], { kind: ['bug', 'idea', 'other'].includes(body.kind) ? body.kind : 'other', text });
+      return ok();
+    }
+
+    // Supprimer son compte (exigé par l'App Store) : tous ses groupes sont quittés, ses photos et sessions effacées.
+    case 'POST /account/delete':
+      if (body.confirm !== true) throw new HttpError(400, 'Confirmation manquante', 'Missing confirmation');
+      await deleteAccount(account);
+      return ok();
+
+    // --- Outils du développeur (OWNER_USERNAME) : traiter les signalements ---
+    case 'POST /owner/delete': {
+      if (!isOwner(account)) throw new HttpError(403, 'Réservé', 'Not allowed');
+      const g = db.groups[body.groupId];
+      const m = g && chat.get(g.id, Number(body.seq));
+      if (!m) throw new HttpError(404, 'Message introuvable', 'Message not found');
+      if (!m.deleted) {
+        const imgId = m.image && m.image.id;
+        chat.remove(g.id, m.seq);
+        if (imgId) images.remove(imgId).catch(() => {});
+        live.emit(g.id, 'del', { channel: m.channel, id: m.seq });
       }
+      return ok();
+    }
+
+    case 'POST /owner/ban': {
+      if (!isOwner(account)) throw new HttpError(403, 'Réservé', 'Not allowed');
+      const g = db.groups[body.groupId];
+      const player = g && g.players[body.playerId];
+      const user = player && player.userId && g.users[player.userId];
+      const target = user && db.accounts[user.accountId];
+      if (!target) throw new HttpError(404, 'Compte introuvable', 'Account not found');
+      if (target.id === account.id) throw new HttpError(400, 'C’est toi', 'That’s you');
+      await deleteAccount(target);
       return ok();
     }
 
     case 'GET /feedback':
       if (!isOwner(account)) throw new HttpError(403, 'Réservé', 'Not allowed');
       return ok({ items: db.feedback || [] });
+
+    case 'POST /feedback/:id/done': {
+      if (!isOwner(account)) throw new HttpError(403, 'Réservé', 'Not allowed');
+      const item = (db.feedback || []).find((x) => x.id === id);
+      if (item) item.done = now;
+      persist();
+      return ok();
+    }
 
     // Notifications : ce téléphone reçoit celles de tous les groupes du compte.
     case 'POST /push/subscribe':
@@ -934,6 +988,7 @@ async function api(req, res, url) {
   const gid = req.headers['x-group'] || url.searchParams.get('g');
   const g = gid && db.groups[gid];
   const me = g && memberIn(g, account);
+  setScopeGroup(g || null);
   if (!me) {
     const e = new HttpError(403, 'Tu ne fais pas (ou plus) partie de ce groupe', 'You’re not in this group (anymore)');
     e.code = 'no-group';
@@ -1075,7 +1130,10 @@ async function api(req, res, url) {
       if (body.emoji) myPlayer.emoji = cleanEmoji(body.emoji);
       if (body.lang != null) {
         account.lang = i18n.lang(body.lang);
-        for (const m of membersOf(account)) m.user.lang = account.lang;
+        for (const m of membersOf(account)) {
+          m.user.lang = account.lang;
+          persist(m.g);
+        }
       }
       // Couleur : une des 16, pas déjà prise par quelqu'un d'autre.
       if (body.color != null) {
@@ -1151,7 +1209,11 @@ async function api(req, res, url) {
         throw new HttpError(429, n ? `Tu as déjà lancé ${n} question${n > 1 ? 's' : ''} aujourd’hui. Ça repart à minuit !` : 'L’admin a désactivé les questions en plus', n ? `You already launched ${n} question${n > 1 ? 's' : ''} today. Resets at midnight!` : 'The admin turned off extra questions');
       }
       let q;
-      if (body.text) {
+      if (body.questionId) {
+        // Une de mes questions en attente (ajoutée dans un set) : lancée tout de suite.
+        q = g.questions[body.questionId];
+        if (!q || q.usedAt || q.removed || q.authorId !== me.id) throw new HttpError(400, 'Question introuvable ou déjà posée', 'Question not found or already asked');
+      } else if (body.text) {
         if (!body.setId) throw new HttpError(400, 'Choisis un set pour ta question');
         q = game.addQuestion(g, body.setId, body.text, me.id);
       } else {
@@ -1263,6 +1325,51 @@ async function api(req, res, url) {
       live.emit(g.id, 'refresh', {});
       return ok({ status: c.status, approvals: c.approvals.length, needed: c.needed });
     }
+
+    // --- Signaler un message ou une personne (exigé par les stores) : arrive chez le développeur et les admins ---
+    case 'POST /report': {
+      checkSendRate('rep:' + me.id);
+      const reason = String(body.reason || '').trim().slice(0, 500);
+      let snapshot = null;
+      let targetPlayer = body.playerId && g.players[body.playerId] ? body.playerId : null;
+      if (body.channel != null && body.seq != null) {
+        const m = chat.get(g.id, Number(body.seq));
+        if (!m || m.channel !== String(body.channel)) throw new HttpError(404, 'Message introuvable', 'Message not found');
+        checkUnlocked(g, m.channel, me);
+        targetPlayer = g.users[m.userId]?.playerId || targetPlayer;
+        snapshot = { channel: m.channel, seq: m.seq, kind: m.kind, text: m.text || null, image: m.image ? '/api/images/' + m.image.id : null, gif: m.gif ? m.gif.url : null, at: m.at };
+      }
+      if (!targetPlayer && !snapshot) throw new HttpError(400, 'Rien à signaler', 'Nothing to report');
+      const who = targetPlayer ? g.players[targetPlayer].name : '?';
+      addFeedback(req, account, g, {
+        kind: 'report',
+        text: `${snapshot ? 'Message' : 'Personne'} signalé(e) : ${who}${reason ? ' — ' + reason : ''}${snapshot && snapshot.text ? '\n« ' + snapshot.text + ' »' : ''}`,
+        report: { groupId: g.id, playerId: targetPlayer, message: snapshot },
+      });
+      // Les admins du groupe sont prévenus aussi (sauf si c'est eux qui sont signalés).
+      push.notify(g, 'claims', (u) => (!u.isAdmin || u.id === me.id || u.playerId === targetPlayer ? null : {
+        title: tr(u.lang, '🚩 Signalement', '🚩 Report'),
+        body: tr(u.lang, `Un ${snapshot ? 'message de' : 'signalement concernant'} ${who} a été signalé dans ${g.name}.`, `A ${snapshot ? 'message from' : 'report about'} ${who} was reported in ${g.name}.`),
+        tag: 'report-' + g.id,
+        url: snapshot ? `/?chat=${snapshot.channel}` : '/',
+      }), me.id);
+      return ok();
+    }
+
+    // Bloquer / débloquer quelqu'un : on ne voit plus ses messages et on n'a plus ses notifs.
+    case 'POST /block': {
+      const pid = String(body.playerId || '');
+      if (!g.players[pid] || pid === me.playerId) throw new HttpError(400, 'Personne inconnue');
+      me.blocked = (me.blocked || []).filter((x) => x !== pid);
+      if (body.block !== false) me.blocked.push(pid);
+      persist();
+      return ok({ blocked: me.blocked });
+    }
+
+    // Quitter le groupe.
+    case 'POST /me/leave':
+      leaveGroup(g, me);
+      return ok();
 
     // --- Questionnaire de profil (si l'admin l'a activé) ---
     case 'GET /quiz':
@@ -1387,6 +1494,7 @@ async function api(req, res, url) {
       if (body.intervalHours != null) s.intervalHours = num(body.intervalHours, MIN_INTERVAL, 24, 'L’intervalle', 'The interval');
       if (body.dropsPerDay != null) s.dropsPerDay = Math.round(num(body.dropsPerDay, 0, 10, 'Le nombre de questions en plus', 'The number of extra questions'));
       if (body.profiles != null) s.profiles = !!body.profiles;
+      if (body.spicy != null) s.spicy = !!body.spicy;
       if (body.startHour != null) s.startHour = Math.round(num(body.startHour, 0, 23, 'L’heure de début', 'The start hour'));
       if (body.endHour != null) s.endHour = Math.round(num(body.endHour, 0, 23, 'L’heure de fin', 'The end hour'));
       if (body.pollHours != null) s.pollHours = num(body.pollHours, 0.02, 168, 'La durée de vote', 'The voting time');
@@ -1520,6 +1628,36 @@ function dailyJobs(g, now = Date.now()) {
   }
 }
 
+// Avis, bug ou signalement : gardé (500 derniers) et envoyé au développeur (OWNER_USERNAME) s'il a les notifs.
+function addFeedback(req, account, g, extra) {
+  const db = store.db;
+  const m = g && memberIn(g, account);
+  const item = {
+    id: newId(),
+    at: Date.now(),
+    username: account.username || null,
+    group: g ? g.name : null,
+    name: m ? g.players[m.playerId]?.name || null : null,
+    lang: account.lang || null,
+    ua: String(req.headers['user-agent'] || '').slice(0, 200),
+    version: changelog.latest().id,
+    ...extra,
+  };
+  db.feedback = [item, ...(db.feedback || [])].slice(0, 500);
+  persist();
+  const owner = Object.values(db.accounts).find(isOwner);
+  const om = owner && owner.id !== account.id && membersOf(owner).find(({ g: og, user }) => (og.pushSubs[user.id] || []).length);
+  if (om) {
+    push.sendTo(om.g, om.user.id, {
+      title: `${{ bug: '🐞', idea: '💡', other: '💬', report: '🚩' }[item.kind] || '💬'} ${item.name || item.username || '?'}${item.group ? ' · ' + item.group : ''}`,
+      body: short(item.text, 160),
+      tag: 'feedback-' + item.id,
+      url: '/?feedback=1',
+    }).catch(() => {});
+  }
+  return item;
+}
+
 // ---------- Nouveautés : une notification par nouvelle version ----------
 // Une seule par personne (même avec plusieurs groupes : un téléphone est abonné pour tous ses groupes),
 // dans sa langue. Lancée une minute après le démarrage : pendant un redéploiement, l'ancienne version tourne encore.
@@ -1565,16 +1703,36 @@ function serveIndexEn(res) {
   if (!indexEn) {
     indexEn = fs.readFileSync(path.join(PUBLIC_DIR, 'index.html'), 'utf8')
       .replace('<html lang="fr">', '<html lang="en" data-lang="en">')
-      .replace('/manifest.webmanifest', '/manifest.en.webmanifest')
-      .replace('<title>Qui de nous ?</title>', '<title>Which of us?</title>')
-      .replace('content="Qui de nous"', 'content="Which of us"');
+      .replace('/manifest.webmanifest', '/manifest.en.webmanifest');
   }
   res.writeHead(200, { 'Content-Type': TYPES['.html'], 'Cache-Control': 'no-cache' });
   res.end(indexEn);
 }
 
+// Liens d'invitation qui ouvrent directement l'app installée (iOS : Universal Links, Android : App Links).
+// APPLE_APP_ID = « EQUIPE.identifiant » (ex. ABCDE12345.com.exemple.app) ; ANDROID_PACKAGE + ANDROID_SHA256
+// (empreinte SHA-256 du certificat de signature, visible dans la Play Console).
+function serveWellKnown(res, rel) {
+  let body = null;
+  if (rel === '/.well-known/apple-app-site-association' && process.env.APPLE_APP_ID) {
+    body = { applinks: { apps: [], details: [{ appIDs: [process.env.APPLE_APP_ID], components: [{ '/': '/', '?': { code: '?*' } }, { '/': '/en/', '?': { code: '?*' } }] }] } };
+  } else if (rel === '/.well-known/assetlinks.json' && process.env.ANDROID_PACKAGE && process.env.ANDROID_SHA256) {
+    body = [{ relation: ['delegate_permission/common.handle_all_urls'], target: { namespace: 'android_app', package_name: process.env.ANDROID_PACKAGE, sha256_cert_fingerprints: process.env.ANDROID_SHA256.split(',').map((x) => x.trim()) } }];
+  }
+  if (!body) return false;
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify(body));
+  return true;
+}
+
 function serveStatic(res, url) {
   let rel = decodeURIComponent(url.pathname);
+  if (rel.startsWith('/.well-known/') && serveWellKnown(res, rel)) return;
+  const legalPage = rel.match(/^(\/en)?\/(privacy|terms|support)\/?$/);
+  if (legalPage) {
+    res.writeHead(200, { 'Content-Type': TYPES['.html'], 'Cache-Control': 'no-cache' });
+    return res.end(legal[legalPage[2]](legalPage[1] ? 'en' : 'fr'));
+  }
   if (rel === '/en' || rel.startsWith('/en/')) return serveIndexEn(res);
   if (rel === '/') rel = '/index.html';
   const file = path.normalize(path.join(PUBLIC_DIR, rel));
@@ -1599,9 +1757,22 @@ function serveStatic(res, url) {
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
+  // L'app mobile (Capacitor) a sa propre origine : on l'autorise à appeler l'API.
+  const origin = req.headers.origin;
+  if (origin && /^(capacitor|ionic):\/\/localhost$|^https?:\/\/localhost(:\d+)?$/.test(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Group, X-Lang');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Max-Age', '86400');
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204);
+      return res.end();
+    }
+  }
   if (url.pathname.startsWith('/api/')) {
     try {
-      await api(req, res, url);
+      await scope(null, () => api(req, res, url)); // les enregistrements ne concerneront que le groupe de la requête
     } catch (e) {
       if (!(e instanceof HttpError)) console.error(e);
       // Le client envoie sa langue (en-tête X-Lang) : erreurs en anglais si l'app est en anglais.
@@ -1634,12 +1805,14 @@ load()
     setTimeout(() => { try { announceRelease(); } catch (e) { console.error('Nouveautés :', e); } }, Number(process.env.ANNOUNCE_DELAY_MS) || 60 * 1000);
     setInterval(() => {
       for (const g of Object.values(store.db.groups)) {
-        game.tick(g);
-        try { dailyJobs(g); } catch (e) { console.error('Rappels :', e); }
+        scope(g, () => {
+          game.tick(g);
+          try { dailyJobs(g); } catch (e) { console.error('Rappels :', e); }
+        });
       }
     }, 60 * 1000);
     server.listen(PORT, () => {
-      console.log(`Qui de nous ? → http://localhost:${PORT}`);
+      console.log(`Whomst → http://localhost:${PORT}`);
       console.log(`questions.md : ${r.sets} sets, ${r.questions} questions${r.added ? ` (${r.added} nouvelles ajoutées aux groupes)` : ''}`);
       console.log(`Groupes : ${groups.length ? groups.map((g) => `${g.name} [${g.code}]`).join(', ') : 'aucun'}`);
       console.log(`Chat : ${messages} messages · GIFs : ${gifs.enabled() ? 'activés' : 'désactivés (pas de GIPHY_API_KEY / TENOR_API_KEY)'}`);

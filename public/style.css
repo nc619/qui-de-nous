@@ -2545,3 +2545,19 @@ html:has(body.noscroll) { overflow: hidden; }
 [data-theme="dark"] .claim-banner { background: #3d3112; }
 [data-theme="dark"] .claim-banner.warn { background: #45161c; }
 [data-theme="dark"] .sk::after { background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.05), transparent); }
+
+/* =====================================================================
+   v13 : stores (signaler, bloquer, quitter, supprimer son compte, pages légales) et app mobile
+   ===================================================================== */
+.legal-line { font-size: 0.75rem; color: var(--muted); text-align: center; margin: 14px 0 0; }
+.legal-line a, .legal-links a { color: var(--muted); }
+.legal-links { margin-top: 0; font-size: 0.78rem; }
+.danger-link { color: var(--danger) !important; }
+.leave-link { display: block; margin: 12px auto 0; font-size: 0.85rem; }
+.fb-done { opacity: 0.55; }
+.fb-acts { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.fb-acts .link-btn { padding: 4px 0 0; font-size: 0.8rem; }
+/* App mobile : pas de survol, pas de sélection de texte sur les boutons, pas de « rebond » de la page entière. */
+.native body { overscroll-behavior-y: none; }
+.native button { -webkit-user-select: none; user-select: none; }
+.qrow-acts { display: inline-flex; gap: 6px; flex-shrink: 0; }

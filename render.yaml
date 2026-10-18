@@ -17,3 +17,9 @@ services:
         sync: false
       - key: OWNER_USERNAME # ton identifiant dans l’app : tu reçois les bugs / avis envoyés par les gens
         sync: false
+      - key: FIREBASE_SERVICE_ACCOUNT # JSON du compte de service Firebase (notifications de l'app mobile, voir STORE.md)
+        sync: false
+      - key: CONTACT_EMAIL # adresse de contact des pages confidentialité / conditions
+        sync: false
+      - key: APP_NAME # nom de l'app sur les stores
+        sync: false

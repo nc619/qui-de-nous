@@ -1,0 +1,7 @@
+{
+  "_": "Réglages de l'app mobile. appId = identifiant unique sur les stores (impossible à changer après la première mise en ligne). appName = nom sous l'icône (modifiable à chaque mise à jour). version = version affichée sur les stores (à augmenter à chaque mise à jour publique). server = le serveur Render.",
+  "appId": "com.whomst.app",
+  "appName": "Whomst",
+  "server": "https://qui-de-nous.onrender.com",
+  "version": "1.0.0"
+}

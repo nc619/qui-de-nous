@@ -9,7 +9,7 @@ self.addEventListener('push', (event) => {
   } catch (e) {
     data = { body: event.data ? event.data.text() : '' };
   }
-  const title = data.title || 'Qui de nous ?';
+  const title = data.title || 'Whomst';
   const options = {
     body: data.body || '',
     icon: '/icon-192.png',

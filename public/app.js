@@ -1,10 +1,24 @@
-// "Qui de nous ?" — client.
+// "Whomst" — client.
 (() => {
   const SET_EMOJIS = ['✨', '🎉', '💀', '🔮', '🤡', '💔', '🧟', '🧠', '🤫', '📱', '🏆', '🚔', '✈️', '🌶️', '🔥', '😈', '🍻', '🏖️', '🎮', '⚽', '🎓', '💼', '🎤', '🍕'];
 
   const $app = document.getElementById('app');
   const $sheet = document.getElementById('sheet');
   const $toast = document.getElementById('toast');
+
+  // App mobile (Capacitor) : l'interface est dans l'app, le serveur est à distance (config.js, écrit au build).
+  // Sur le site web : tout est sur le même serveur (API = '').
+  const CFG = window.QDN_CONFIG || {};
+  const NATIVE = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+  const PLATFORM = NATIVE ? window.Capacitor.getPlatform() : 'web';
+  const Plugins = (NATIVE && window.Capacitor.Plugins) || {};
+  const API = CFG.api || '';
+  const PUBLIC_URL = CFG.publicUrl || location.origin; // adresse des liens d'invitation et des pages légales
+  // Petite vibration (retour haptique natif dans l'app, vibreur sur Android web).
+  function buzz(ms = 10) {
+    if (NATIVE && Plugins.Haptics) Plugins.Haptics.impact({ style: ms > 11 ? 'MEDIUM' : 'LIGHT' }).catch(() => {});
+    else if (navigator.vibrate) navigator.vibrate(ms);
+  }
 
   let token = load('token');
   let state = null;
@@ -49,7 +63,8 @@
   // ---------- Langue (français / anglais) ----------
   // Par défaut : la langue du lien d'où on vient (/en → anglais, sinon français). On peut changer dans Moi.
   // Le choix est gardé sur l'appareil ; ouvrir un lien /en repasse en anglais tant qu'on n'a pas choisi soi-même.
-  const fromEn = /^\/en(\/|$)/.test(location.pathname) || document.documentElement.dataset.lang === 'en';
+  // App mobile : la langue du téléphone (français si le téléphone est en français, anglais sinon).
+  const fromEn = /^\/en(\/|$)/.test(location.pathname) || document.documentElement.dataset.lang === 'en' || (NATIVE && !/^fr/i.test(navigator.language || 'fr'));
   let LANG = load('lang') || (fromEn ? 'en' : 'fr');
   if (fromEn && !load('langPicked')) LANG = 'en';
   if (LANG !== 'en') LANG = 'fr';
@@ -213,7 +228,7 @@
   function avatar(p, size = '') {
     if (p.id === 'nobody') return `<span class="avatar ${size} nobody-av" title="${T('Personne', 'Nobody')}">∅</span>`;
     const inner = p.photo
-      ? `<img src="/api/photos/${esc(p.id)}?v=${esc(p.photo)}" alt="" loading="lazy" decoding="async">`
+      ? `<img src="${API}/api/photos/${esc(p.id)}?v=${esc(p.photo)}" alt="" loading="lazy" decoding="async">`
       : `<svg viewBox="0 0 64 64" aria-hidden="true"><use href="#an-${Number(p.animal) || 0}"/></svg>`;
     return `<span class="avatar ${size} ${p.photo ? 'has-photo' : ''}" style="--pc:${esc(p.color)}" title="${esc(p.name)}">${inner}</span>`;
   }
@@ -363,7 +378,7 @@
   async function api(method, url, body) {
     let res;
     try {
-      res = await fetch('/api/' + url, {
+      res = await fetch(API + '/api/' + url, {
         method,
         headers: { 'Content-Type': 'application/json', 'X-Lang': LANG, ...(token ? { Authorization: 'Bearer ' + token } : {}), ...(groupId ? { 'X-Group': groupId } : {}) },
         body: body ? JSON.stringify(body) : undefined,
@@ -444,11 +459,12 @@
         <div class="auth-box welcome">
           ${langSwitch('auth-lang')}
           <span class="logo-emoji">🤔</span>
-          <h1 class="logo">Qui de nous ?</h1>
+          <h1 class="logo">Whomst</h1>
           <p class="tagline">${T('Des questions sur ta bande, plusieurs fois par jour. Tout le monde vote. Verdicts sans pitié.', 'Questions about your crew, a few times a day. Everyone votes. No mercy.')}</p>
           <button class="btn btn-main btn-block" id="wJoin">${T('Rejoindre un groupe', 'Join a group')}</button>
           <button class="btn btn-soft btn-block" id="wCreate">${T('Créer un groupe', 'Create a group')}</button>
           <button class="link-btn welcome-login" id="wLogin">${T('J’ai déjà un compte', 'I already have an account')}</button>
+          <p class="legal-line">${T(`En continuant, tu acceptes les <a href="${PUBLIC_URL}/terms" target="_blank" rel="noopener">conditions</a> et la <a href="${PUBLIC_URL}/privacy" target="_blank" rel="noopener">politique de confidentialité</a>. 17 ans et +.`, `By continuing, you accept the <a href="${PUBLIC_URL}/en/terms" target="_blank" rel="noopener">terms</a> and the <a href="${PUBLIC_URL}/en/privacy" target="_blank" rel="noopener">privacy policy</a>. Ages 17+.`)}</p>
           <p class="error" id="authErr">${esc(err)}</p>
         </div>
       </div>`;
@@ -662,8 +678,9 @@
     startLobbyPolling();
     const groups = account.groups;
     const total = groups.reduce((n, g) => n + g.todo + g.unread + (g.claims || 0), 0);
-    document.title = total ? `(${total}) Qui de nous ?` : 'Qui de nous ?';
+    document.title = total ? `(${total}) Whomst` : 'Whomst';
     if (navigator.setAppBadge) navigator.setAppBadge(total).catch(() => {});
+    setNativeBadge(total);
     const acc = account.account;
 
     const card = (g) => {
@@ -699,7 +716,7 @@
 
     $app.innerHTML = `
       <header class="top">
-        <h1>Qui de nous ?</h1>
+        <h1>Whomst</h1>
         <button class="theme-btn" id="themeBtn" role="switch"></button>
       </header>
       <main id="lobby" class="lobby">
@@ -723,6 +740,7 @@
             <button class="btn btn-soft" id="logoutBtn">${T('Se déconnecter', 'Log out')}</button>
           </div>
           <button class="link-btn lobby-link" id="linkBtn">${T('J’ai un autre groupe avec un compte d’avant la mise à jour', 'I have another group with an account from before the update')}</button>
+          <button class="link-btn lobby-link danger-link" id="deleteAcc">${T('Supprimer mon compte', 'Delete my account')}</button>
         </div>
         ${aboutLinks()}
       </main>`;
@@ -742,6 +760,7 @@
     document.getElementById('pinBtn').onclick = () => openPinSheet();
     const ub = document.getElementById('userBtn');
     if (ub) ub.onclick = () => openUsernameSheet();
+    document.getElementById('deleteAcc').onclick = () => openDeleteAccount();
     bindLangSwitch($app, renderLobby);
     bindAbout($app);
     if ($sheet.hidden) openPendingAbout();
@@ -1000,6 +1019,25 @@
     });
   }
 
+  // Supprimer son compte : tous ses groupes sont quittés, photos et sessions effacées. Deux étapes pour éviter l'accident.
+  function openDeleteAccount() {
+    openSheet(`
+      <div class="sheet-head"><h2>${T('Supprimer mon compte', 'Delete my account')}</h2><button class="x" data-close>✕</button></div>
+      <p>${T('Tu quittes tous tes groupes et ton compte est effacé : identifiant, PIN, photos de profil, réponses au quiz, notifications. <b>C’est définitif.</b>', 'You leave all your groups and your account is erased: username, PIN, profile photos, quiz answers, notifications. <b>This can’t be undone.</b>')}</p>
+      <p class="muted small">${T('Tes votes et les messages déjà envoyés restent dans l’historique des groupes. Supprime d’abord les messages que tu veux voir disparaître.', 'Your votes and messages already sent stay in the groups’ history. Delete any messages you want gone first.')}</p>
+      <label for="delConfirm">${T('Écris SUPPRIMER pour confirmer', 'Type DELETE to confirm')}</label>
+      <input class="input" id="delConfirm" autocapitalize="characters" autocomplete="off">
+      <button class="btn btn-danger btn-block" id="delGo">${T('Supprimer définitivement', 'Delete for good')}</button>`, (root) => {
+      action(root.querySelector('#delGo'), async () => {
+        if (root.querySelector('#delConfirm').value.trim().toUpperCase() !== T('SUPPRIMER', 'DELETE')) throw new Error(T('Écris SUPPRIMER pour confirmer', 'Type DELETE to confirm'));
+        await api('POST', 'account/delete', { confirm: true });
+        closeSheet();
+        logoutLocal();
+        toast(T('Compte supprimé', 'Account deleted'));
+      });
+    });
+  }
+
   function openUsernameSheet() {
     openSheet(`
       <div class="sheet-head"><h2>${T('Ton identifiant', 'Your username')}</h2><button class="x" data-close>✕</button></div>
@@ -1037,17 +1075,17 @@
   // ---------- Invitation ----------
 
   function inviteLink() {
-    return `${location.origin}${L ? '/en/' : '/'}?code=${state.group.code}`;
+    return `${PUBLIC_URL}${L ? '/en/' : '/'}?code=${state.group.code}`;
   }
 
   function showInvite(justCreated) {
-    const text = T(`Rejoins « ${state.group.name} » sur Qui de nous ?\nCode : ${state.group.code}\n${inviteLink()}`, `Join “${state.group.name}” on Which of us?\nCode: ${state.group.code}\n${inviteLink()}`);
+    const text = T(`Rejoins « ${state.group.name} » sur Whomst\nCode : ${state.group.code}\n${inviteLink()}`, `Join “${state.group.name}” on Whomst\nCode: ${state.group.code}\n${inviteLink()}`);
     openSheet(`
       <div class="sheet-head"><h2>${justCreated ? T('Groupe créé', 'Group created') : T('Inviter des potes', 'Invite your mates')}</h2><button class="x" data-close>✕</button></div>
       <p class="muted" style="margin:0 0 6px">${T(`Envoie ce code (ou le lien) à tes potes pour qu’ils rejoignent <b>${esc(state.group.name)}</b>.`, `Send this code (or the link) to your mates so they can join <b>${esc(state.group.name)}</b>.`)}</p>
       <div class="big-code">${esc(state.group.code)}</div>
       <div class="row">
-        <button class="btn btn-main" id="shareBtn">${navigator.share ? T('Partager', 'Share') : T('Copier le lien', 'Copy link')}</button>
+        <button class="btn btn-main" id="shareBtn">${navigator.share || (NATIVE && Plugins.Share) ? T('Partager', 'Share') : T('Copier le lien', 'Copy link')}</button>
         <button class="btn btn-soft" id="copyCode">${T('Copier le code', 'Copy code')}</button>
       </div>
       <button class="link-btn" id="otherLang">${T('Des potes anglophones ? Copier le lien en anglais', 'Mates who speak French? Copy the French link')}</button>
@@ -1061,10 +1099,12 @@
         }
       };
       root.querySelector('#copyCode').onclick = () => copy(state.group.code, T('Code copié', 'Code copied'));
-      root.querySelector('#otherLang').onclick = () => copy(`${location.origin}${L ? '/' : '/en/'}?code=${state.group.code}`, T('Lien en anglais copié', 'French link copied'));
+      root.querySelector('#otherLang').onclick = () => copy(`${PUBLIC_URL}${L ? '/' : '/en/'}?code=${state.group.code}`, T('Lien en anglais copié', 'French link copied'));
       root.querySelector('#shareBtn').onclick = async () => {
-        if (navigator.share) {
-          try { await navigator.share({ title: T('Qui de nous ?', 'Which of us?'), text }); } catch { /* annulé */ }
+        if (NATIVE && Plugins.Share) {
+          try { await Plugins.Share.share({ title: T('Whomst', 'Whomst'), text }); } catch { /* annulé */ }
+        } else if (navigator.share) {
+          try { await navigator.share({ title: T('Whomst', 'Whomst'), text }); } catch { /* annulé */ }
         } else copy(text, T('Invitation copiée', 'Invite copied'));
       };
     });
@@ -1153,6 +1193,7 @@
   // ou voté : on retire celles qui ne servent plus (message lu, question votée ou terminée).
   async function clearNotifs() {
     try {
+      if (NATIVE) return clearNativeNotifs();
       const reg = swReg || (await swReady);
       if (!reg || !reg.getNotifications || !state) return;
       const list = await reg.getNotifications();
@@ -1268,9 +1309,10 @@
         </button>`)
       .join('');
     nav.querySelectorAll('[data-tab]').forEach((b) => (b.onclick = () => go(b.dataset.tab)));
-    const name = T('Qui de nous ?', 'Which of us?');
+    const name = T('Whomst', 'Whomst');
     document.title = n + unread ? `(${n + unread}) ${name}` : name;
     if (navigator.setAppBadge) navigator.setAppBadge(n + unread).catch(() => {});
+    setNativeBadge(n + unread);
   }
 
   // ---------- Thème clair / sombre ----------
@@ -1503,8 +1545,12 @@
   }
 
   // Aperçu d'un message en une ligne (« GIF », « Photo », ou le texte).
+  // Personnes bloquées (dans ce groupe) : leurs messages sont masqués.
+  const isBlocked = (pid) => !!(state && state.me.blocked && state.me.blocked.includes(pid) && pid !== state.me.playerId);
+
   function msgSnippet(m) {
     if (m.deleted) return `<i>${T('supprimé', 'deleted')}</i>`;
+    if (isBlocked(m.playerId)) return `<i>${T('message masqué', 'hidden message')}</i>`;
     if (m.kind === 'gif') return 'GIF';
     if (m.kind === 'image') return `📷 ${T('Photo', 'Photo')}`;
     return esc(m.text);
@@ -1629,7 +1675,7 @@
       timer = setTimeout(() => {
         timer = null;
         long = true;
-        if (navigator.vibrate) navigator.vibrate(12);
+        buzz(12);
         swallowNextClick();
         halfPick = { pollId: b.dataset.vote, picks: [b.dataset.target] };
         renderView();
@@ -1947,7 +1993,7 @@
   });
 
   function installBanner() {
-    if (isStandalone() || load('installHidden')) return '';
+    if (NATIVE || isStandalone() || load('installHidden')) return '';
     if (!installPrompt && !isIOS) return '';
     return `
       <div class="install-banner">
@@ -2207,14 +2253,14 @@
       <div class="card">
         <label for="newQ" style="margin-top:0">${T('Ajouter des questions', 'Add questions')}</label>
         <textarea class="input" id="newQ" placeholder="${T('Une question par ligne.&#10;Qui est le plus susceptible de…', 'One question per line.&#10;Who’s most likely to…')}"></textarea>
-        <p class="muted small">${T('Elles restent secrètes jusqu’à ce qu’elles tombent. Pas de doublons : on vérifie !', 'They stay secret until they drop. No duplicates, we check!')}</p>
+        <p class="muted small">${T('Elles restent secrètes et tombent plus tard, au hasard. Pour en poser une tout de suite : « Lancer » à côté de la question, ou le bouton + dans Live. Pas de doublons : on vérifie !', 'They stay secret and drop later, at random. To ask one right now: “Launch” next to it, or the + button in Live. No duplicates, we check!')}</p>
         <button class="btn btn-soft btn-block" id="addQ" style="margin-top:10px">${T('Ajouter au set', 'Add to the set')}</button>
       </div>
 
       ${d.mine.length ? `
         <div class="section-title">${T('Tes questions en attente', 'Your questions waiting')} <span class="count">${d.mine.length}</span></div>
         <div class="card qlist">${d.mine.map((q) => `
-          <div class="qrow"><span>${esc(q.text)}</span><button class="btn btn-small btn-danger" data-delq="${q.id}" aria-label="${T('Supprimer', 'Delete')}">${icon('trash')}</button></div>`).join('')}
+          <div class="qrow"><span>${esc(q.text)}</span><span class="qrow-acts"><button class="btn btn-small btn-main" data-launchq="${q.id}">${T('Lancer', 'Launch')}</button><button class="btn btn-small btn-danger" data-delq="${q.id}" aria-label="${T('Supprimer', 'Delete')}">${icon('trash')}</button></span></div>`).join('')}
         </div>` : ''}
 
       <div class="section-title">${T('Déjà jouées', 'Already played')} <span class="count">${d.played.length}</span></div>
@@ -2233,6 +2279,12 @@
       setDetail = null;
       await refresh();
     });
+    // Lancer une de ses questions en attente tout de suite (sinon elle tombe plus tard, au hasard).
+    view.querySelectorAll('[data-launchq]').forEach((b) => action(b, async () => {
+      if (state.me.dropsLeft <= 0) throw new Error(T('Plus de question en plus aujourd’hui. Elle tombera plus tard au hasard.', 'No extra questions left today. It’ll drop later at random.'));
+      setDetail = null;
+      await drop({ questionId: b.dataset.launchq });
+    }));
     view.querySelectorAll('[data-delq]').forEach((b) => action(b, async () => {
       if (!confirm(T('Supprimer cette question ?', 'Delete this question?'))) return;
       await api('DELETE', `questions/${b.dataset.delq}`);
@@ -2271,6 +2323,14 @@
     view.querySelectorAll('[data-recap]').forEach((b) => (b.onclick = () => openRecap(b.dataset.recap)));
     const sc = document.getElementById('streakCard');
     if (sc) sc.onclick = () => openStreakSheet();
+    view.querySelectorAll('[data-reportp]').forEach((b) => (b.onclick = () => openReportSheet({ playerId: b.dataset.reportp })));
+    view.querySelectorAll('[data-blockp]').forEach((b) => action(b, async () => {
+      const pid = b.dataset.blockp;
+      const block = !isBlocked(pid);
+      if (block && !confirm(T(`Bloquer ${player(pid).name} ? Tu ne verras plus ses messages (tu peux débloquer quand tu veux).`, `Block ${player(pid).name}? You won’t see their messages (you can unblock anytime).`))) return;
+      await setBlocked(pid, block);
+      toast(block ? T('Bloqué', 'Blocked') : T('Débloqué', 'Unblocked'));
+    }));
   }
 
   function statsProfile(pid) {
@@ -2324,7 +2384,8 @@
         <div class="card titles-board">${st.titles.map((t) => `
           <div class="title-row">${avatar(player(t.playerId), 'sm')}<span class="name">${esc(player(t.playerId).name)}</span><span class="title-chip ${t.low ? 'low' : ''}">${t.emoji} ${esc(titleText(t))}</span></div>`).join('')}
         </div>` : ''}
-      ${anyData ? `<div class="section-title">${T('Classements', 'Rankings')}</div>${defs.map(ranking).join('')}` : ''}`;
+      ${anyData ? `<div class="section-title">${T('Classements', 'Rankings')}</div>${defs.map(ranking).join('')}` : ''}
+      ${pid !== state.me.playerId && p.claimed ? `<div class="about-links"><button class="link-btn" data-reportp="${esc(pid)}">🚩 ${T('Signaler', 'Report')}</button><button class="link-btn" data-blockp="${esc(pid)}">🚫 ${isBlocked(pid) ? T('Débloquer', 'Unblock') : T('Bloquer', 'Block')}</button></div>` : ''}`;
   }
 
   // Affinités : qui vote comme toi, qui vote pour toi, qui a la même réputation que toi…
@@ -2878,7 +2939,8 @@
       <div class="about-links">
         <button class="link-btn" data-news>✨ ${T('Nouveautés', 'What’s new')}${newsUnseen() ? '<span class="dot-new"></span>' : ''}</button>
         <button class="link-btn" data-feedback>💬 ${T('Un bug ? Un avis ?', 'Bug? Feedback?')}</button>
-      </div>`;
+      </div>
+      <div class="about-links legal-links"><a href="${PUBLIC_URL}${L ? '/en' : ''}/privacy" target="_blank" rel="noopener">${T('Confidentialité', 'Privacy')}</a><a href="${PUBLIC_URL}${L ? '/en' : ''}/terms" target="_blank" rel="noopener">${T('Conditions', 'Terms')}</a></div>`;
   }
   function bindAbout(root) {
     root.querySelectorAll('[data-news]').forEach((b) => (b.onclick = () => openNews()));
@@ -2935,11 +2997,29 @@
         const box = root.querySelector('#fbItems');
         if (!box) return;
         box.innerHTML = items.length ? `<div class="card qlist fb-list" style="margin-top:12px">${items.map((x) => `
-          <div class="qrow"><b>${{ bug: '🐞', idea: '💡', other: '💬' }[x.kind] || '💬'} ${esc(x.name || x.username || '?')}${x.group ? ` · ${esc(x.group)}` : ''}</b><span>${esc(x.text)}</span><span class="muted small">${ago(x.at)} · ${esc(x.version || '')} · ${esc((x.ua.match(/\(([^)]*)\)/) || [])[1] || '')}</span></div>`).join('')}</div>` : `<p class="muted small">${T('Rien pour l’instant.', 'Nothing yet.')}</p>`;
+          <div class="qrow ${x.done ? 'fb-done' : ''}"><b>${{ bug: '🐞', idea: '💡', other: '💬', report: '🚩' }[x.kind] || '💬'} ${esc(x.name || x.username || '?')}${x.group ? ` · ${esc(x.group)}` : ''}</b><span style="white-space:pre-wrap">${esc(x.text)}</span>${x.report && x.report.message && x.report.message.image ? `<a href="${API}${esc(x.report.message.image)}" target="_blank" rel="noopener">photo</a>` : ''}<span class="muted small">${ago(x.at)} · ${esc(x.version || '')} · ${esc((x.ua.match(/\(([^)]*)\)/) || [])[1] || '')}</span>
+            <span class="fb-acts">${x.report && x.report.message ? `<button class="link-btn" data-fbdel="${esc(x.id)}">${T('Supprimer le message', 'Delete message')}</button>` : ''}${x.report && x.report.playerId ? `<button class="link-btn danger-link" data-fbban="${esc(x.id)}">${T('Bannir', 'Ban')}</button>` : ''}${x.done ? '' : `<button class="link-btn" data-fbok="${esc(x.id)}">${T('Traité ✓', 'Done ✓')}</button>`}</span></div>`).join('')}</div>` : `<p class="muted small">${T('Rien pour l’instant.', 'Nothing yet.')}</p>`;
       };
       const lb = root.querySelector('#fbList');
       if (lb) action(lb, showList);
       if (showReceived && owner) showList().catch((e) => toast(e.message));
+      root.addEventListener('click', async (e) => {
+        const b = e.target.closest('[data-fbdel], [data-fbban], [data-fbok]');
+        if (!b) return;
+        const { items } = await api('GET', 'feedback');
+        const x = items.find((i) => i.id === (b.dataset.fbdel || b.dataset.fbban || b.dataset.fbok));
+        if (!x) return;
+        try {
+          if (b.dataset.fbdel) await api('POST', 'owner/delete', { groupId: x.report.groupId, seq: x.report.message.seq });
+          if (b.dataset.fbban) {
+            if (!confirm(T('Bannir cette personne ? Son compte est supprimé et elle quitte tous ses groupes.', 'Ban this person? Their account is deleted and they leave all their groups.'))) return;
+            await api('POST', 'owner/ban', { groupId: x.report.groupId, playerId: x.report.playerId });
+          }
+          await api('POST', `feedback/${x.id}/done`);
+          toast(T('Fait', 'Done'));
+          showList();
+        } catch (err) { toast(err.message); }
+      });
     });
     draw();
   }
@@ -2956,7 +3036,7 @@
     const m = me();
     const iOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
     const standalone = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone;
-    const pushOk = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window && vapid();
+    const pushOk = NATIVE ? !!Plugins.FirebaseMessaging : 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window && vapid();
 
     view.innerHTML = `
       <div class="card" id="profileCard">
@@ -2997,7 +3077,7 @@
       <div class="card">
         <div class="card-title">Notifications</div>
         <p class="muted small" id="pushStatus" style="margin:0 0 12px">…</p>
-        ${iOS && !standalone ? `<div class="info" style="margin-bottom:12px">${T('Sur iPhone : touche <b>Partager</b> puis <b>Sur l’écran d’accueil</b>, et ouvre l’app depuis la nouvelle icône pour pouvoir activer les notifications.', 'On iPhone: tap <b>Share</b> then <b>Add to Home Screen</b>, and open the app from the new icon to be able to turn on notifications.')}</div>` : ''}
+        ${iOS && !standalone && !NATIVE ? `<div class="info" style="margin-bottom:12px">${T('Sur iPhone : touche <b>Partager</b> puis <b>Sur l’écran d’accueil</b>, et ouvre l’app depuis la nouvelle icône pour pouvoir activer les notifications.', 'On iPhone: tap <b>Share</b> then <b>Add to Home Screen</b>, and open the app from the new icon to be able to turn on notifications.')}</div>` : ''}
         <div class="row" style="margin-top:0">
           <button class="btn btn-main" id="pushBtn" ${pushOk ? '' : 'disabled'}>${T('Activer les notifications', 'Turn on notifications')}</button>
           <button class="btn btn-soft" id="pushTest" hidden>${T('Tester', 'Test')}</button>
@@ -3019,6 +3099,7 @@
       ${state.me.isAdmin ? adminHtml() : ''}
 
       <button class="btn btn-soft btn-block" id="logout">${T('Se déconnecter', 'Log out')}</button>
+      <button class="link-btn danger-link leave-link" id="leaveGroup">${T('Quitter ce groupe', 'Leave this group')}</button>
       ${aboutLinks()}`;
 
     bindLangSwitch(view, () => renderMain());
@@ -3064,6 +3145,15 @@
     });
     document.getElementById('inviteBtn').onclick = () => showInvite(false);
     bindAbout(view);
+    action(document.getElementById('leaveGroup'), async () => {
+      const others = state.players.filter((p) => p.claimed && p.id !== state.me.playerId).length;
+      const msg = T(`Quitter « ${state.group.name} » ? Ton nom redevient libre (tes votes et messages restent).${state.me.isAdmin && others ? ' Le rôle d’admin passe au membre le plus ancien.' : ''}`, `Leave “${state.group.name}”? Your name becomes free again (your votes and messages stay).${state.me.isAdmin && others ? ' The admin role goes to the longest-standing member.' : ''}`);
+      if (!confirm(msg)) return;
+      await api('POST', 'me/leave');
+      cacheClear((k) => k !== 'st_' + groupId);
+      toast(T('Tu as quitté le groupe', 'You left the group'));
+      leaveGroup();
+    });
     action(document.getElementById('logout'), async () => {
       try { await api('POST', 'logout'); } catch { /* déjà déconnecté */ }
       stopPolling();
@@ -3139,6 +3229,7 @@
         <div class="card-title">${T('Options du groupe', 'Group options')}</div>
         <label class="switch-row"><span>${T('Questions en plus par jour', 'Extra questions per day')}<small class="muted">${T('Combien chacun peut en lancer avec le bouton +, en plus du planning.', 'How many each person can launch with the + button, on top of the schedule.')}</small></span>
           <span class="stepper"><button type="button" data-step="-1" aria-label="−">−</button><b id="dropsN">${s.dropsPerDay ?? 1}</b><button type="button" data-step="1" aria-label="+">+</button></span></label>
+        <label class="switch-row"><span>${T('Sets 18+', '18+ sets')}<small class="muted">${T('Questions spicy (sexe, tromperie…). Désactivées : elles ne tombent plus et les sets sont cachés.', 'Spicy questions (sex, cheating…). Off: they stop dropping and the sets are hidden.')}</small></span><input type="checkbox" class="switch" id="spicyOn" ${s.spicy !== false ? 'checked' : ''}></label>
         <label class="switch-row"><span>${T('Réponse « Personne »', '“Nobody” answer')}<small class="muted">${T('Sur les questions au conditionnel (« Qui ferait… »), on peut voter pour personne.', 'On “Who would…” questions, people can vote for nobody.')}</small></span><input type="checkbox" class="switch" id="allowNobody" ${s.allowNobody ? 'checked' : ''}></label>
         <label class="switch-row"><span>${T('Questionnaire de profil', 'Profile questionnaire')}<small class="muted">${T('Un onglet Quiz en plus : chacun répond à quelques questions (âge, études ou boulot, couple…), et les questions qui vous collent tombent plus souvent. Réponses anonymes.', 'An extra Quiz tab: everyone answers a few questions (age, studies or work, relationship…), and the questions that fit you come up more often. Answers stay anonymous.')}</small></span><input type="checkbox" class="switch" id="profilesOn" ${s.profiles ? 'checked' : ''}></label>
       </div>
@@ -3217,6 +3308,16 @@
       document.activeElement.blur();
       await refresh();
     });
+    document.getElementById('spicyOn').onchange = async (e) => {
+      try {
+        await api('PATCH', 'admin/settings', { spicy: e.target.checked });
+        toast(e.target.checked ? T('Sets 18+ activés', '18+ sets on') : T('Sets 18+ désactivés', '18+ sets off'));
+        await refresh();
+      } catch (err) {
+        e.target.checked = !e.target.checked;
+        toast(err.message);
+      }
+    };
     document.getElementById('allowNobody').onchange = async (e) => {
       try {
         await api('PATCH', 'admin/settings', { allowNobody: e.target.checked });
@@ -3256,7 +3357,7 @@
     action(document.getElementById('exportQ'), async () => {
       const { questions } = await api('GET', 'admin/unscored');
       if (!questions.length) return toast(T('Rien à noter, tout est à jour', 'Nothing to score, all up to date'));
-      const text = T('Questions « Qui de nous ? » à noter (stats : chaos, hot, coeur, cerveau, genance, toxique, exces ; 1 à 3 stats par question, valeurs -2 à 3). Réponds en JSON {"id": {"stat": valeur}}.', '“Which of us?” questions to score (stats: chaos, hot, coeur, cerveau, genance, toxique, exces; 1 to 3 stats per question, values -2 to 3). Answer in JSON {"id": {"stat": value}}.') + '\n\n' + JSON.stringify(questions, null, 1);
+      const text = T('Questions « Whomst » à noter (stats : chaos, hot, coeur, cerveau, genance, toxique, exces ; 1 à 3 stats par question, valeurs -2 à 3). Réponds en JSON {"id": {"stat": valeur}}.', '“Whomst” questions to score (stats: chaos, hot, coeur, cerveau, genance, toxique, exces; 1 to 3 stats per question, values -2 to 3). Answer in JSON {"id": {"stat": value}}.') + '\n\n' + JSON.stringify(questions, null, 1);
       try {
         await navigator.clipboard.writeText(text);
         toast(T(`${plural(questions.length, 'question')} copiée${questions.length > 1 ? 's' : ''}`, `${plural(questions.length, 'question')} copied`));
@@ -3292,7 +3393,7 @@
     document.getElementById('sInterval').oninput = sync;
     action(document.getElementById('exportRatings'), async () => {
       const data = await api('GET', 'admin/ratings');
-      const text = T('Notes des questions « Qui de nous ? » (1 = nulle, 5 = excellente), à utiliser pour écrire de nouvelles questions dans le même esprit que les mieux notées.', 'Ratings of the “Which of us?” questions (1 = bad, 5 = great), to use for writing new questions in the same spirit as the best rated ones.') + '\n\n' + JSON.stringify(data, null, 1);
+      const text = T('Notes des questions « Whomst » (1 = nulle, 5 = excellente), à utiliser pour écrire de nouvelles questions dans le même esprit que les mieux notées.', 'Ratings of the “Whomst” questions (1 = bad, 5 = great), to use for writing new questions in the same spirit as the best rated ones.') + '\n\n' + JSON.stringify(data, null, 1);
       try {
         await navigator.clipboard.writeText(text);
         toast(T('Notes copiées', 'Ratings copied'));
@@ -3314,7 +3415,7 @@
     liveCtrl = ctrl;
     (async () => {
       try {
-        const res = await fetch('/api/events', { headers: { Authorization: 'Bearer ' + token, 'X-Group': groupId || '' }, signal: ctrl.signal });
+        const res = await fetch(API + '/api/events', { headers: { Authorization: 'Bearer ' + token, 'X-Group': groupId || '' }, signal: ctrl.signal });
         if (!res.ok || !res.body) throw new Error('live');
         for (const k of [...chats.keys()]) if (k !== chatOpen) chats.delete(k);
         if (chatOpen) loadChat(chatOpen, true); // rattrape ce qui a pu être manqué
@@ -3430,7 +3531,7 @@
     const mini = general.last.map((m) => {
       const mine = m.playerId === state.me.playerId;
       const u = player(m.playerId);
-      const text = m.deleted ? `<i>${T('message supprimé', 'message deleted')}</i>` : m.kind === 'text' ? mentionHtml(m) : msgSnippet(m);
+      const text = m.deleted ? `<i>${T('message supprimé', 'message deleted')}</i>` : m.kind === 'text' && !isBlocked(m.playerId) ? mentionHtml(m) : msgSnippet(m);
       return `
         <div class="mini-msg ${mine ? 'mine' : ''}">
           ${mine ? '' : avatar(u, 'xs')}
@@ -3680,7 +3781,7 @@
   });
 
   // iPhone, app installée : pas de geste retour du système. On le refait : glisser depuis le bord gauche.
-  if (isIOS && isStandalone()) {
+  if ((isIOS && isStandalone()) || PLATFORM === 'ios') {
     let edge = null;
     document.addEventListener('touchstart', (e) => {
       const t = e.touches[0];
@@ -3857,7 +3958,7 @@
       el.appendChild(heart);
       setTimeout(() => heart.remove(), 800);
     }
-    if (navigator.vibrate) navigator.vibrate(10);
+    buzz(10);
     if ((m.reactions || {})[state.me.playerId] === LIKE) return;
     m.reactions = { ...(m.reactions || {}), [state.me.playerId]: LIKE }; // affiché tout de suite
     setTimeout(() => { if (chatOpen) renderChatMessages(); }, 450);
@@ -3892,11 +3993,14 @@
       <div class="emoji-all">${EMOJI_GRID.map((e) => `<button data-pick="${e}" class="${mine === e ? 'on' : ''}">${e}</button>`).join('')}</div>
       <div class="react-actions">
         <button class="link-btn" id="pickReply">${icon('reply')} ${T('Répondre', 'Reply')}</button>
+        ${m.playerId !== state.me.playerId ? `<button class="link-btn muted" id="pickReport">🚩 ${T('Signaler', 'Report')}</button>` : ''}
         ${mine ? `<button class="link-btn" data-pick="${esc(mine)}">${T('Retirer ma réaction', 'Remove my reaction')} ${mine}</button>` : ''}
       </div>`, (root) => {
       const pick = (e) => { closeSheet(); reactTo(m.id, e); };
       root.querySelectorAll('[data-pick]').forEach((b) => (b.onclick = () => pick(b.dataset.pick)));
       root.querySelector('#pickReply').onclick = () => { closeSheet(); setReply(m); };
+      const rep = root.querySelector('#pickReport');
+      if (rep) rep.onclick = () => openReportSheet({ message: m });
       const input = root.querySelector('#emojiInput');
       input.oninput = () => {
         const e = firstEmoji(input.value);
@@ -3920,7 +4024,7 @@
       timer = setTimeout(() => {
         fired = true;
         timer = null;
-        if (navigator.vibrate) navigator.vibrate(12);
+        buzz(12);
         swallowNextClick();
         const m = chats.get(chatOpen)?.messages.find((x) => x.id === id);
         if (m && !m.deleted) openReactPicker(m);
@@ -3988,7 +4092,7 @@
         hint.style.opacity = String(Math.min(1, s.dx / 60));
         hint.style.transform = `scale(${s.dx >= 60 ? 1.15 : 0.7 + Math.min(1, s.dx / 60) * 0.3})`;
       }
-      if (s.dx >= 60 && !s.buzzed) { s.buzzed = true; if (navigator.vibrate) navigator.vibrate(8); }
+      if (s.dx >= 60 && !s.buzzed) { s.buzzed = true; buzz(8); }
     });
     const end = (e) => {
       if (!s || (e && e.pointerId !== s.id)) return;
@@ -4027,6 +4131,42 @@
     document.getElementById('replyCancel').onclick = () => setReply(null);
     const text = document.getElementById('chatText');
     if (text && !text.disabled) text.focus();
+  }
+
+  // Signaler un message ou une personne, et/ou la bloquer (exigé par les stores ; arrive chez le développeur
+  // et les admins du groupe).
+  function openReportSheet({ message, playerId }) {
+    const pid = message ? message.playerId : playerId;
+    const p = player(pid);
+    const reasons = [['harass', T('Harcèlement ou insultes', 'Harassment or insults')], ['private', T('Infos ou photos privées', 'Private info or photos')], ['sexual', T('Contenu sexuel non voulu', 'Unwanted sexual content')], ['other', T('Autre', 'Other')]];
+    let reason = 'harass';
+    const draw = () => openSheet(`
+      <div class="sheet-head"><h2>🚩 ${message ? T('Signaler ce message', 'Report this message') : T(`Signaler ${esc(p.name)}`, `Report ${esc(p.name)}`)}</h2><button class="x" data-close>✕</button></div>
+      ${message ? `<p class="react-preview"><b class="pname" style="--pc:${esc(p.color)}">${esc(p.name)}</b> ${message.kind === 'text' ? esc(message.text) : msgSnippet(message)}</p>` : ''}
+      <div class="fb-kinds">${reasons.map(([k, l]) => `<button class="chip ${reason === k ? 'on' : ''}" data-reason="${k}">${l}</button>`).join('')}</div>
+      <textarea class="input" id="repText" maxlength="500" placeholder="${T('Précisions (facultatif)', 'Details (optional)')}"></textarea>
+      <label class="switch-row"><span>${T(`Bloquer ${esc(p.name)}`, `Block ${esc(p.name)}`)}<small class="muted">${T('Tu ne verras plus ses messages et tu n’auras plus ses notifs.', 'You won’t see their messages or get notified about them.')}</small></span><input type="checkbox" class="switch" id="repBlock" ${isBlocked(pid) ? 'checked' : ''}></label>
+      <button class="btn btn-main btn-block" id="repGo">${T('Envoyer le signalement', 'Send report')}</button>
+      <p class="muted small" style="margin:8px 0 0">${T('Les admins du groupe et l’équipe de l’app sont prévenus. On traite chaque signalement sous 24 h.', 'The group admins and the app team are notified. Every report is handled within 24 hours.')}</p>`, (root) => {
+      root.querySelectorAll('[data-reason]').forEach((b) => (b.onclick = () => { const t = root.querySelector('#repText').value; reason = b.dataset.reason; draw(); root.querySelector('#repText').value = t; }));
+      action(root.querySelector('#repGo'), async () => {
+        const label = reasons.find(([k]) => k === reason)[1];
+        const extra = root.querySelector('#repText').value.trim();
+        await api('POST', 'report', message ? { channel: chatOpen, seq: message.id, reason: label + (extra ? ' : ' + extra : '') } : { playerId: pid, reason: label + (extra ? ' : ' + extra : '') });
+        const block = root.querySelector('#repBlock').checked;
+        if (block !== isBlocked(pid)) await setBlocked(pid, block);
+        closeSheet();
+        toast(T('Merci, c’est signalé 🙏', 'Thanks, it’s reported 🙏'));
+      });
+    });
+    draw();
+  }
+
+  async function setBlocked(pid, block) {
+    const r = await api('POST', 'block', { playerId: pid, block });
+    state.me.blocked = r.blocked;
+    if (chatOpen) renderChatMessages();
+    renderView();
   }
 
   // ---------- Tags « @Prénom » : suggestions pendant qu'on écrit ----------
@@ -4147,7 +4287,7 @@
     v.className = 'viewer';
     v.innerHTML = `
       <div class="viewer-top"><span>${avatar(u, 'xs')} ${esc(u.name)} · ${hhmm(m.at)}</span><button class="x" aria-label="${T('Fermer', 'Close')}">✕</button></div>
-      <img src="/api/images/${esc(m.image.id)}" alt="">`;
+      <img src="${API}/api/images/${esc(m.image.id)}" alt="">`;
     v.onclick = () => (history.state && history.state.guard ? history.back() : closeViewer());
     document.body.appendChild(v);
     syncGuard();
@@ -4203,13 +4343,16 @@
       if (newDay) html += `<div class="chat-day">${dayLabel(m.at)}</div>`;
       const first = newDay || prev.playerId !== m.playerId || m.at - prev.at > 5 * 60000 || !!m.reply;
       const last = !next || next.playerId !== m.playerId || next.at - m.at > 5 * 60000 || dayKey(next.at) !== dayKey(m.at) || !!next.reply;
-      const media = !m.deleted && (m.kind === 'gif' || m.kind === 'image');
+      const hidden = !m.deleted && isBlocked(m.playerId);
+      const media = !m.deleted && !hidden && (m.kind === 'gif' || m.kind === 'image');
       const content = m.deleted
         ? `<i>${T('Message supprimé', 'Message deleted')}</i>`
+        : hidden
+          ? `<i>${T('Message masqué (personne bloquée)', 'Hidden message (blocked person)')}</i>`
         : m.kind === 'gif'
           ? `<img src="${esc(m.gif.url)}" width="${m.gif.w}" height="${m.gif.h}" alt="GIF" loading="lazy">`
           : m.kind === 'image'
-            ? `<img src="/api/images/${esc(m.image.id)}" width="${m.image.w}" height="${m.image.h}" alt="${T('Photo', 'Photo')}" loading="lazy" decoding="async">`
+            ? `<img src="${API}/api/images/${esc(m.image.id)}" width="${m.image.w}" height="${m.image.h}" alt="${T('Photo', 'Photo')}" loading="lazy" decoding="async">`
             : mentionHtml(m);
       const reacts = reactionGroups(m);
       const sel = selMsg === m.id;
@@ -4452,6 +4595,10 @@
     if (pushSynced && !force) return;
     pushSynced = true;
     try {
+      if (NATIVE) {
+        if (!load('pushOff')) await nativePushRegister(false);
+        return;
+      }
       if (!vapid() || !('Notification' in window) || Notification.permission !== 'granted' || load('pushOff')) return;
       await subscribePush();
     } catch (e) {
@@ -4460,6 +4607,7 @@
   }
 
   async function setupPushButton(pushOk) {
+    if (NATIVE) return setupNativePushButton();
     const btn = document.getElementById('pushBtn');
     const status = document.getElementById('pushStatus');
     const testBtn = document.getElementById('pushTest');
@@ -4533,7 +4681,7 @@
   let presenceTimer = null;
   function sendPresence(visible) {
     if (!token || !groupId) return;
-    fetch('/api/presence', {
+    fetch(API + '/api/presence', {
       method: 'POST',
       keepalive: true,
       headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token, 'X-Group': groupId },
@@ -4552,9 +4700,156 @@
   }
   window.addEventListener('pagehide', () => stopPresence());
 
-  const swReady = 'serviceWorker' in navigator
+  const swReady = !NATIVE && 'serviceWorker' in navigator
     ? navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' }).then((r) => (swReg = r)).catch(() => null)
     : Promise.resolve(null);
+
+  // ---------- App mobile (iOS / Android, via Capacitor) ----------
+  // Notifications natives (Firebase), bouton retour Android, liens d'invitation qui ouvrent l'app, pastille,
+  // barre d'état. Rien de tout ça ne tourne sur le site web.
+  const FM = () => Plugins.FirebaseMessaging;
+
+  // Jeton du téléphone → serveur (pour tous les groupes du compte).
+  async function nativePushRegister(ask) {
+    if (!FM()) throw new Error(T('Notifications indisponibles', 'Notifications unavailable'));
+    let perm = (await FM().checkPermissions()).receive;
+    if (perm !== 'granted' && ask) perm = (await FM().requestPermissions()).receive;
+    if (perm !== 'granted') return false;
+    const { token: fcm } = await FM().getToken();
+    if (!fcm) return false;
+    save('fcmToken', fcm);
+    await api('POST', 'push/subscribe', { subscription: { fcm, platform: PLATFORM } });
+    return true;
+  }
+
+  async function setupNativePushButton() {
+    const btn = document.getElementById('pushBtn');
+    const status = document.getElementById('pushStatus');
+    const testBtn = document.getElementById('pushTest');
+    const out = document.getElementById('pushOut');
+    if (!btn) return;
+    let perm = 'denied';
+    try { perm = FM() ? (await FM().checkPermissions()).receive : 'denied'; } catch { /* plugin absent */ }
+    const on = perm === 'granted' && !load('pushOff');
+    status.textContent = on
+      ? T('Activées sur ce téléphone.', 'On for this phone.')
+      : perm === 'denied'
+        ? T('Bloquées. Autorise les notifications pour l’app dans les réglages du téléphone.', 'Blocked. Allow notifications for the app in your phone settings.')
+        : T('Désactivées sur ce téléphone.', 'Off on this phone.');
+    btn.textContent = on ? T('Désactiver', 'Turn off') : T('Activer les notifications', 'Turn on notifications');
+    btn.className = on ? 'btn btn-soft' : 'btn btn-main';
+    btn.disabled = perm === 'denied' && !on && PLATFORM === 'ios';
+    testBtn.hidden = !on;
+    btn.onclick = async () => {
+      btn.disabled = true;
+      try {
+        if (on) {
+          const t = load('fcmToken');
+          if (t) await api('POST', 'push/unsubscribe', { endpoint: 'fcm:' + t });
+          save('pushOff', '1');
+          toast(T('Notifications désactivées', 'Notifications off'));
+        } else {
+          save('pushOff', null);
+          if (!(await nativePushRegister(true))) throw new Error(T('Autorisation refusée', 'Permission denied'));
+          toast(T('Notifications activées', 'Notifications on'));
+        }
+      } catch (e) { toast(e.message); }
+      setupNativePushButton();
+    };
+    testBtn.onclick = async () => {
+      testBtn.disabled = true;
+      out.textContent = T('Envoi…', 'Sending…');
+      try {
+        const r = await api('POST', 'push/test');
+        out.textContent = !r.devices ? T('Aucun appareil enregistré.', 'No device registered.') : r.results.map((x) => (x.ok ? T('Envoyée : elle doit arriver dans quelques secondes.', 'Sent: it should arrive in a few seconds.') : `${T('Échec', 'Failed')} : ${x.error || x.status || ''}`)).join('\n');
+      } catch (e) { out.textContent = e.message; }
+      testBtn.disabled = false;
+    };
+  }
+
+  // Ouvre ce que désigne un lien (notification touchée, lien d'invitation) : ?g=…&chat=…, ?code=…, ?recap=…
+  function openLink(href) {
+    let u;
+    try { u = new URL(href, PUBLIC_URL); } catch { return; }
+    const code = u.searchParams.get('code');
+    const ch = u.searchParams.get('chat');
+    const gid = u.searchParams.get('g');
+    if (u.searchParams.get('recap')) pendingRecap = u.searchParams.get('recap');
+    if (u.searchParams.has('news')) pendingNews = true;
+    if (u.searchParams.has('feedback')) pendingFeedback = true;
+    if (code) {
+      if (!token) { inviteCode = code; ensureAccount().then(startAccount).catch((e) => toast(e.message)); return; }
+      const already = account && account.groups.find((x) => x.code === code.toUpperCase());
+      return already ? enterGroup(already.id) : openJoinSheet(code);
+    }
+    if (!token) return;
+    if ((pendingNews || pendingFeedback) && (!gid || gid === groupId)) return openPendingAbout();
+    if (gid && gid !== groupId) {
+      pendingChat = ch;
+      enterGroup(gid);
+    } else if (ch && state) openChat(ch);
+    else if (pendingRecap && state) openRecapFromLink();
+  }
+
+  // Pastille sur l'icône : ce qu'il reste à voir (mise à jour à chaque rafraîchissement).
+  function setNativeBadge(n) {
+    if (NATIVE && Plugins.Badge) Plugins.Badge.set({ count: n }).catch(() => {});
+  }
+
+  if (NATIVE) {
+    document.documentElement.classList.add('native', 'native-' + PLATFORM);
+    const { App, StatusBar, SplashScreen } = Plugins;
+    if (SplashScreen) setTimeout(() => SplashScreen.hide().catch(() => {}), 200);
+    if (StatusBar) {
+      StatusBar.setStyle({ style: 'DARK' }).catch(() => {}); // texte blanc sur le dégradé de l'en-tête
+      if (PLATFORM === 'android') StatusBar.setOverlaysWebView({ overlay: true }).catch(() => {});
+    }
+    if (FM()) {
+      FM().addListener('notificationActionPerformed', (e) => {
+        const d = (e && e.notification && e.notification.data) || {};
+        if (d.url) openLink(d.url);
+      });
+      FM().addListener('tokenReceived', (e) => {
+        if (e && e.token && token && !load('pushOff') && e.token !== load('fcmToken')) {
+          save('fcmToken', e.token);
+          api('POST', 'push/subscribe', { subscription: { fcm: e.token, platform: PLATFORM } }).catch(() => {});
+        }
+      });
+    }
+    if (App) {
+      // Bouton retour Android : même chemin que le retour de l'app ; à l'accueil, l'app passe en arrière-plan.
+      App.addListener('backButton', () => {
+        if (storyOpen()) return closeStory();
+        if (viewerOpen()) return closeViewer();
+        if (!$sheet.hidden) return closeSheet();
+        if (state) {
+          if (history.state && history.state.guard) return history.back();
+          if (goBack()) return syncGuard();
+        }
+        App.minimizeApp();
+      });
+      // Lien d'invitation (ou de notification) ouvert alors que l'app est installée.
+      App.addListener('appUrlOpen', (e) => { if (e && e.url) openLink(e.url); });
+    }
+  }
+
+  // Notifications déjà vues (message lu, question votée) : retirées du centre de notifs du téléphone.
+  async function clearNativeNotifs() {
+    if (!FM() || !state) return;
+    const { notifications } = await FM().getDeliveredNotifications().catch(() => ({ notifications: [] }));
+    const done = (notifications || []).filter((n) => {
+      const tag = (n.data && n.data.tag) || n.tag || '';
+      const m = /^(chat|mention|poll|votes)-(.+?)(?:@(\w+))?$/.exec(tag);
+      if (!m || (m[3] && m[3] !== groupId)) return false;
+      if (m[1] === 'chat' || m[1] === 'mention') {
+        const t = state.chat.threads.find((x) => x.channel === m[2]);
+        return chatOpen === m[2] || !(t ? t.unread : 0);
+      }
+      const p = state.live.find((x) => x.id === m[2]);
+      return !p || !!p.myVote;
+    });
+    if (done.length) await FM().removeDeliveredNotifications({ notifications: done }).catch(() => {});
+  }
 
   // ---------- Démarrage ----------
 

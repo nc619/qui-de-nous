@@ -23,9 +23,17 @@ Puis ouvrir http://localhost:3000.
 | `PUSH_CONTACT` | Contact envoyé aux services de notifications (`mailto:…`)            | `mailto:admin@example.com` |
 | `GIPHY_API_KEY`| Clé Giphy pour chercher des GIFs dans le chat                        | *(GIFs désactivés)* |
 | `TENOR_API_KEY`| Alternative à Giphy (utilisée si pas de clé Giphy)                   | *(aucune)*      |
+| `FIREBASE_SERVICE_ACCOUNT` | JSON du compte de service Firebase : notifications de l'app mobile (voir [STORE.md](STORE.md)) | *(notifs app désactivées)* |
+| `CONTACT_EMAIL` | Adresse de contact (pages confidentialité / conditions) | *(PUSH_CONTACT)* |
+| `APP_NAME` | Nom de l'app sur les pages légales | `Qui de nous ?` |
+| `APPLE_APP_ID`, `ANDROID_PACKAGE`, `ANDROID_SHA256` | Liens d'invitation qui ouvrent l'app installée | *(aucun)* |
 | `OWNER_USERNAME`| Identifiant du développeur : reçoit les bugs / avis envoyés depuis l'app (notif + liste dans « Un bug ? Un avis ? ») | *(aucun)* |
 
-Sans `DATABASE_URL`, tout est enregistré dans `data/db.json`.
+Sans `DATABASE_URL`, tout est enregistré dans `data/db.json`. Avec, PostgreSQL : une ligne par compte, session, groupe, question et sondage (tables `qdn_*`) ; seules les lignes modifiées sont réécrites. L'ancienne table `quidenous_store` (tout en un) est migrée automatiquement au premier démarrage et gardée telle quelle comme sauvegarde.
+
+## App mobile (App Store, Google Play)
+
+Dans [`mobile/`](mobile) (Capacitor) : même interface, notifications natives, bouton retour Android, liens d'invitation qui ouvrent l'app. Tout le guide de publication : [STORE.md](STORE.md). Pages exigées par les stores : `/privacy`, `/terms`, `/support` (+ `/en/…`). Builds iOS/Android dans le cloud : GitHub Actions → « App mobile ». Groupe de démo pour la relecture : `node scripts/demo-group.js <serveur>`. Dans l'app : signaler un message ou une personne, bloquer, quitter un groupe, supprimer son compte, sets 18+ désactivables par l'admin.
 
 ## Fonctionnement
 
