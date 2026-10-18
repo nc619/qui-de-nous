@@ -34,11 +34,11 @@ const WORDS = new Set([
   'sets', 'questions', 'push', 'subscribe', 'unsubscribe', 'admin', 'players', 'reset', 'settings', 'drop-auto',
   'unscored', 'scores', 'group', 'code', 'chat', 'read', 'typing', 'events', 'gifs', 'messages', 'presence', 'test', 'react', 'photos', 'photo',
   'images', 'image', 'rate', 'ratings', 'account', 'accounts', 'recover', 'recovery', 'link',
-  'claim', 'claims', 'approve', 'deny', 'cancel', 'quiz', 'recap', 'changelog', 'feedback', 'report', 'block', 'leave', 'delete', 'owner', 'ban', 'done',
+  'claim', 'claims', 'approve', 'deny', 'cancel', 'quiz', 'recap', 'changelog', 'feedback', 'remind', 'report', 'block', 'leave', 'delete', 'owner', 'ban', 'done',
 ]);
 
 // Petit raccourci pour les textes envoyés aux gens (notifications) : français ou anglais selon leur réglage.
-const tr = (lang, fr, en) => (lang === 'en' ? en : fr);
+const tr = (lang, fr, en, es) => (lang === 'en' ? en : lang === 'es' ? (es ?? en) : fr);
 
 // Questions en plus lancées à la main (bouton +) : réglage du groupe (1 par personne et par jour par défaut),
 // remise à zéro à minuit dans le fuseau du groupe.
@@ -120,9 +120,9 @@ function validPin(pin) {
 }
 
 function cleanName(g, name, exceptId) {
-  const n = cleanText(name, 2, 24, 'Le pseudo', 'The name');
+  const n = cleanText(name, 2, 24, 'Le pseudo', 'The name', 'El nombre');
   const taken = Object.values(g.players).find((p) => p.id !== exceptId && p.name.toLowerCase() === n.toLowerCase());
-  if (taken) throw new HttpError(409, `« ${n} » est déjà pris`, `“${n}” is already taken`);
+  if (taken) throw new HttpError(409, `« ${n} » est déjà pris`, `“${n}” is already taken`, `«${n}» ya está cogido`);
   return n;
 }
 
@@ -157,11 +157,11 @@ function newSession(account) {
 function cleanUsername(name, exceptId) {
   const u = String(name || '').trim();
   if (!/^[\p{L}\p{N}._-]{3,20}$/u.test(u)) {
-    throw new HttpError(400, 'L’identifiant doit faire 3 à 20 caractères (lettres, chiffres, . _ -), sans espace', 'Your username must be 3 to 20 characters (letters, numbers, . _ -), no spaces');
+    throw new HttpError(400, 'L’identifiant doit faire 3 à 20 caractères (lettres, chiffres, . _ -), sans espace', 'Your username must be 3 to 20 characters (letters, numbers, . _ -), no spaces', 'El usuario tiene que tener de 3 a 20 caracteres (letras, números, . _ -), sin espacios');
   }
   const n = u.toLowerCase();
   if (Object.values(store.db.accounts).some((a) => a.id !== exceptId && a.username && a.username.toLowerCase() === n)) {
-    throw new HttpError(409, 'Cet identifiant est déjà pris', 'That username is already taken');
+    throw new HttpError(409, 'Cet identifiant est déjà pris', 'That username is already taken', 'Ese usuario ya está cogido');
   }
   return u;
 }
@@ -209,7 +209,7 @@ const memberIn = (g, account) => Object.values(g.users).find((u) => u.accountId 
 
 // Rejoindre un groupe en prenant un nom de la liste (le compte n'a pas encore de nom dans ce groupe).
 function claimPlayer(g, account, playerId, name) {
-  if (memberIn(g, account)) throw new HttpError(409, 'Tu fais déjà partie de ce groupe', 'You’re already in this group');
+  if (memberIn(g, account)) throw new HttpError(409, 'Tu fais déjà partie de ce groupe', 'You’re already in this group', 'Ya estás en este grupo');
   const player = g.players[playerId];
   if (!player) throw new HttpError(400, 'Choisis ton nom dans la liste');
   if (player.userId) throw new HttpError(409, 'Quelqu’un a déjà pris ce nom');
@@ -342,16 +342,16 @@ function notifyClaim(g, c) {
   push.notify(g, 'claims', (u) => {
     if (claimTarget(g, c)?.id === u.id) {
       return {
-        title: tr(u.lang, '⚠️ Quelqu’un demande ton nom', '⚠️ Someone is asking for your name'),
-        body: tr(u.lang, `Quelqu’un veut récupérer « ${name} » dans ${g.name}. Si ce n’est pas toi, ouvre l’app pour refuser.`, `Someone wants to take back “${name}” in ${g.name}. If it isn’t you, open the app to deny it.`),
+        title: tr(u.lang, '⚠️ Quelqu’un demande ton nom', '⚠️ Someone is asking for your name', '⚠️ Alguien quiere tu nombre'),
+        body: tr(u.lang, `Quelqu’un veut récupérer « ${name} » dans ${g.name}. Si ce n’est pas toi, ouvre l’app pour refuser.`, `Someone wants to take back “${name}” in ${g.name}. If it isn’t you, open the app to deny it.`, `Alguien quiere recuperar «${name}» en ${g.name}. Si no eres tú, abre la app para rechazarlo.`),
         tag: 'claim-' + c.id,
         url: '/',
       };
     }
     if (!canApprove(g, c, u)) return null;
     return {
-      title: tr(u.lang, '🔑 Demande de récupération', '🔑 Account recovery request'),
-      body: tr(u.lang, `« ${name} » a perdu son compte et veut revenir dans ${g.name}. C’est bien lui/elle ? Ouvre l’app pour valider.`, `“${name}” lost their account and wants back into ${g.name}. Is it really them? Open the app to approve.`),
+      title: tr(u.lang, '🔑 Demande de récupération', '🔑 Account recovery request', '🔑 Solicitud de recuperación'),
+      body: tr(u.lang, `« ${name} » a perdu son compte et veut revenir dans ${g.name}. C’est bien lui/elle ? Ouvre l’app pour valider.`, `“${name}” lost their account and wants back into ${g.name}. Is it really them? Open the app to approve.`, `«${name}» ha perdido su cuenta y quiere volver a ${g.name}. ¿Seguro que es esa persona? Abre la app para confirmarlo.`),
       tag: 'claim-' + c.id,
       url: '/',
     };
@@ -428,7 +428,7 @@ const signups = new Map();
 function checkSignupRate(ip) {
   const now = Date.now();
   const list = (signups.get(ip) || []).filter((t) => now - t < 3600 * 1000);
-  if (list.length >= 30) throw new HttpError(429, 'Trop de comptes créés, réessaie plus tard.', 'Too many accounts created, try again later.');
+  if (list.length >= 30) throw new HttpError(429, 'Trop de comptes créés, réessaie plus tard.', 'Too many accounts created, try again later.', 'Se han creado demasiadas cuentas, inténtalo más tarde.');
   list.push(now);
   signups.set(ip, list);
 }
@@ -552,7 +552,7 @@ function chatThreads(g, me, now = Date.now()) {
   const threads = [{ channel: 'general', ...chatSummary(g, me, 'general', 4) }];
   const polls = chat.channels(g.id)
     .filter((c) => c !== 'general' && g.polls[c] && g.polls[c].endsAt > now)
-    .map((c) => ({ channel: c, text: g.polls[c].text, textEn: g.questions[g.polls[c].questionId]?.textEn || null, setId: g.polls[c].setId, ...chatSummary(g, me, c, 1) }))
+    .map((c) => ({ channel: c, text: g.polls[c].text, textEn: g.questions[g.polls[c].questionId]?.textEn || null, textEs: g.questions[g.polls[c].questionId]?.textEs || null, setId: g.polls[c].setId, ...chatSummary(g, me, c, 1) }))
     .filter((t) => t.count)
     .sort((a, b) => b.lastAt - a.lastAt)
     .slice(0, 40);
@@ -573,7 +573,10 @@ function short(s, n) {
   return a.length > n ? a.slice(0, n - 1).join('') + '…' : a.join('');
 }
 
-const pollText = (g, poll, lang) => (lang === 'en' && g.questions[poll.questionId]?.textEn) || poll.text;
+const pollText = (g, poll, lang) => {
+  const q = g.questions[poll.questionId];
+  return (lang === 'en' && q?.textEn) || (lang === 'es' && (q?.textEs || q?.textEn)) || poll.text;
+};
 
 // Tags « @Prénom » dans un message → identifiants des comptes tagués (les noms peuvent contenir des espaces :
 // on essaie les plus longs d'abord). Même règle côté client pour surligner.
@@ -607,12 +610,12 @@ function notifyChat(g, me, channel, msg) {
   if (replied && replied.userId !== me.id) special.add(replied.userId);
   const what = (u) => {
     const lang = u.lang;
-    if (chatLocked(g, channel, u.id)) return tr(lang, 'Nouveau message · vote pour le voir', 'New message · vote to see it');
-    if (msg.kind === 'gif') return tr(lang, 'A envoyé un GIF', 'Sent a GIF');
-    if (msg.kind === 'image') return tr(lang, 'A envoyé une photo', 'Sent a photo');
+    if (chatLocked(g, channel, u.id)) return tr(lang, 'Nouveau message · vote pour le voir', 'New message · vote to see it', 'Mensaje nuevo · vota para verlo');
+    if (msg.kind === 'gif') return tr(lang, 'A envoyé un GIF', 'Sent a GIF', 'Ha enviado un GIF');
+    if (msg.kind === 'image') return tr(lang, 'A envoyé une photo', 'Sent a photo', 'Ha enviado una foto');
     return short(msg.text, 160);
   };
-  const where = (u) => (channel === 'general' ? tr(u.lang, 'Chat du groupe', 'Group chat') : short(pollText(g, g.polls[channel], u.lang), 60));
+  const where = (u) => (channel === 'general' ? tr(u.lang, 'Chat du groupe', 'Group chat', 'Chat del grupo') : short(pollText(g, g.polls[channel], u.lang), 60));
   const wantsMention = (u) => special.has(u.id) && push.prefs(u).mentions;
   const blocked = (u) => (u.blocked || []).includes(me.playerId);
   push.notify(g, 'chat', (u) => (wantsMention(u) || blocked(u) ? null : {
@@ -623,8 +626,8 @@ function notifyChat(g, me, channel, msg) {
   }), me.id);
   push.notify(g, 'mentions', (u) => (!special.has(u.id) || blocked(u) ? null : {
     title: (msg.mentions || []).includes(u.id)
-      ? tr(u.lang, `${author.name} t’a tagué·e · ${where(u)}`, `${author.name} tagged you · ${where(u)}`)
-      : tr(u.lang, `${author.name} t’a répondu · ${where(u)}`, `${author.name} replied to you · ${where(u)}`),
+      ? tr(u.lang, `${author.name} t’a tagué·e · ${where(u)}`, `${author.name} tagged you · ${where(u)}`, `${author.name} te ha etiquetado · ${where(u)}`)
+      : tr(u.lang, `${author.name} t’a répondu · ${where(u)}`, `${author.name} replied to you · ${where(u)}`, `${author.name} te ha respondido · ${where(u)}`),
     body: what(u),
     tag: 'mention-' + channel,
     url: `/?chat=${channel}`,
@@ -637,8 +640,8 @@ function notifyVote(g, me, poll) {
   const voters = Object.keys(poll.votes).length;
   const total = Object.keys(g.players).length;
   push.notify(g, 'votes', (u) => ({
-    title: tr(u.lang, `${author.name} a voté`, `${author.name} voted`),
-    body: `${short(pollText(g, poll, u.lang), 120)} · ${tr(u.lang, `${voters}/${total} ${voters > 1 ? 'ont' : 'a'} voté`, `${voters}/${total} voted`)}`,
+    title: tr(u.lang, `${author.name} a voté`, `${author.name} voted`, `${author.name} ha votado`),
+    body: `${short(pollText(g, poll, u.lang), 120)} · ${tr(u.lang, `${voters}/${total} ${voters > 1 ? 'ont' : 'a'} voté`, `${voters}/${total} voted`, `${voters}/${total} han votado`)}`,
     tag: 'votes-' + poll.id,
     url: '/',
   }), me.id);
@@ -674,6 +677,29 @@ function archiveList(g, me, now, before, setId) {
   return { items: list.slice(0, ARCHIVE_PAGE).map((p) => pv(g, p, me, now)), hasMore: list.length > ARCHIVE_PAGE };
 }
 
+// Questionnaire : qui a répondu (pour l'admin) et la dernière demande de l'admin (fenêtre chez les autres).
+const quizAnswered = (g, u) => !!((g.profiles || {})[u.id] && Object.keys(g.profiles[u.id].answers || {}).length);
+function quizState(g) {
+  const list = Object.values(g.users).filter((u) => !u.disabled && u.playerId);
+  return { askedAt: (g.quizAsk && g.quizAsk.at) || null, askedBy: (g.quizAsk && g.users[g.quizAsk.by]?.playerId) || null, answered: list.filter((u) => quizAnswered(g, u)).length, members: list.length };
+}
+function askQuiz(g, me, now) {
+  g.quizAsk = { at: now, by: me.id };
+  const admin = g.players[me.playerId];
+  const todo = Object.values(g.users).filter((u) => !u.disabled && u.playerId && u.id !== me.id && !quizAnswered(g, u));
+  live.emit(g.id, 'refresh', {});
+  push.notify(g, 'polls', (u) => (todo.includes(u) ? {
+    title: tr(u.lang, '🧩 Petit questionnaire', '🧩 Quick questionnaire', '🧩 Un cuestionario rapidito'),
+    body: tr(u.lang,
+      `${admin ? admin.name : 'L’admin'} demande à tout le monde d’y répondre : 1 minute, anonyme, et les questions colleront mieux au groupe.`,
+      `${admin ? admin.name : 'The admin'} wants everyone to fill it in: 1 minute, anonymous, and the questions will fit the group better.`,
+      `${admin ? admin.name : 'El admin'} quiere que todo el mundo lo rellene: 1 minuto, anónimo, y las preguntas encajarán mejor con el grupo.`),
+    tag: 'quiz',
+    url: '/?quiz=1',
+  } : null), me.id);
+  return todo.length;
+}
+
 function stateFor(g, me, now) {
   const livePolls = Object.values(g.polls).filter((p) => p.endsAt > now).sort((a, b) => b.startsAt - a.startsAt);
   const archive = archiveList(g, me, now);
@@ -703,6 +729,7 @@ function stateFor(g, me, now) {
     streaks: streaks.compute(g, now),
     claims: openClaims(g, now).filter((c) => canApprove(g, c, me) || claimTarget(g, c)?.id === me.id).map((c) => claimView(g, c, me)),
     recaps: recap.months(g, now),
+    quiz: quizState(g),
     latestNews: changelog.latest().id,
     vapidKey: push.publicKey(),
   };
@@ -773,7 +800,7 @@ async function api(req, res, url) {
         const account = accountByName(body.username);
         const code = String(body.code || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
         const r = account && account.recovery;
-        if (!r || r.expires < now || r.hash !== sha(code)) throw new HttpError(401, 'Identifiant ou code incorrect (ou code expiré)', 'Wrong username or code (or the code expired)');
+        if (!r || r.expires < now || r.hash !== sha(code)) throw new HttpError(401, 'Identifiant ou code incorrect (ou code expiré)', 'Wrong username or code (or the code expired)', 'Usuario o código incorrecto (o ha caducado)');
         const pin = validPin(body.pin);
         account.salt = crypto.randomBytes(16).toString('hex');
         account.pinHash = hashPin(pin, account.salt);
@@ -798,7 +825,7 @@ async function api(req, res, url) {
         const pin = String(body.pin || '');
         if (body.username != null) {
           const account = accountByName(body.username);
-          if (!account || !checkPin(pin, account)) throw new HttpError(401, 'Identifiant ou PIN incorrect', 'Wrong username or PIN');
+          if (!account || !checkPin(pin, account)) throw new HttpError(401, 'Identifiant ou PIN incorrect', 'Wrong username or PIN', 'Usuario o PIN incorrecto');
           return ok({ token: newSession(account) });
         }
         const account = legacyAccount(body.code, body.name, pin);
@@ -828,7 +855,7 @@ async function api(req, res, url) {
         for (const m of membersOf(account)) m.user.lang = account.lang; // notifications dans la bonne langue partout
       }
       if (body.pin != null) {
-        if (account.pinHash && !checkPin(String(body.oldPin || ''), account)) throw new HttpError(401, 'Ancien PIN incorrect', 'Wrong current PIN');
+        if (account.pinHash && !checkPin(String(body.oldPin || ''), account)) throw new HttpError(401, 'Ancien PIN incorrect', 'Wrong current PIN', 'El PIN actual no es correcto');
         const pin = validPin(body.pin);
         account.salt = crypto.randomBytes(16).toString('hex');
         account.pinHash = hashPin(pin, account.salt);
@@ -839,7 +866,7 @@ async function api(req, res, url) {
 
     // Nouveau groupe : on en devient l'admin, avec un pseudo dans ce groupe.
     case 'POST /groups': {
-      const name = cleanText(body.groupName, 2, 40, 'Le nom du groupe', 'The group name');
+      const name = cleanText(body.groupName, 2, 40, 'Le nom du groupe', 'The group name', 'El nombre del grupo');
       checkCreationRate(ip);
       const g = newGroup(name);
       const player = addPlayer(g, body.name || account.username);
@@ -869,11 +896,11 @@ async function api(req, res, url) {
         const g = groupByCode(body.code);
         const player = g.players[body.playerId];
         const target = player && player.userId && g.users[player.userId];
-        if (!target || target.disabled) throw new HttpError(400, 'Ce nom est libre : rejoins directement', 'This name is free: just join');
-        if (memberIn(g, account)) throw new HttpError(409, 'Tu fais déjà partie de ce groupe', 'You’re already in this group');
+        if (!target || target.disabled) throw new HttpError(400, 'Ce nom est libre : rejoins directement', 'This name is free: just join', 'Este nombre está libre: únete directamente');
+        if (memberIn(g, account)) throw new HttpError(409, 'Tu fais déjà partie de ce groupe', 'You’re already in this group', 'Ya estás en este grupo');
         if (target.accountId === account.id) return ok({ groupId: g.id });
         const rule = claimRule(g, target);
-        if (!rule.needed) throw new HttpError(400, 'Personne d’autre dans le groupe ne peut confirmer que c’est toi', 'Nobody else in the group can confirm it’s you');
+        if (!rule.needed) throw new HttpError(400, 'Personne d’autre dans le groupe ne peut confirmer que c’est toi', 'Nobody else in the group can confirm it’s you', 'Nadie más del grupo puede confirmar que eres tú');
         g.claims ||= {};
         for (const c of openClaims(g, now)) if (c.accountId === account.id) Object.assign(c, { status: 'cancelled', closedAt: now });
         const c = { id: newId(), playerId: player.id, accountId: account.id, createdAt: now, approvals: [], denials: [], ...rule, status: 'open' };
@@ -894,7 +921,7 @@ async function api(req, res, url) {
         live.emit(g.id, 'refresh', {});
         return ok(lobbyFor(account, now));
       }
-      throw new HttpError(404, 'Demande introuvable', 'Request not found');
+      throw new HttpError(404, 'Demande introuvable', 'Request not found', 'No se encuentra la solicitud');
     }
 
     // Rattacher à ce compte un groupe où on avait déjà un compte « à l'ancienne » (code + pseudo + PIN).
@@ -907,7 +934,7 @@ async function api(req, res, url) {
         const other = user && db.accounts[user.accountId];
         if (!user || user.disabled || !other || !checkPin(String(body.pin || ''), other)) throw new HttpError(401, 'Pseudo ou PIN incorrect');
         if (other.id === account.id) return ok({ groupId: g.id });
-        if (memberIn(g, account)) throw new HttpError(409, 'Tu as déjà un autre nom dans ce groupe', 'You already have another name in this group');
+        if (memberIn(g, account)) throw new HttpError(409, 'Tu as déjà un autre nom dans ce groupe', 'You already have another name in this group', 'Ya tienes otro nombre en este grupo');
         // L'ancien compte ne sert plus que s'il a d'autres groupes ; sinon on le fond dans celui-ci.
         user.accountId = account.id;
         user.lang = account.lang || user.lang || null;
@@ -922,8 +949,8 @@ async function api(req, res, url) {
     // Signaler un bug / donner son avis. Gardé dans la base (les 500 derniers) ; le développeur est prévenu.
     case 'POST /feedback': {
       const text = String(body.text || '').replace(/\r/g, '').trim();
-      if (text.length < 3) throw new HttpError(400, 'Écris quelques mots', 'Write a few words');
-      if (text.length > 2000) throw new HttpError(400, 'Trop long (2000 caractères max)', 'Too long (2000 characters max)');
+      if (text.length < 3) throw new HttpError(400, 'Écris quelques mots', 'Write a few words', 'Escribe unas palabras');
+      if (text.length > 2000) throw new HttpError(400, 'Trop long (2000 caractères max)', 'Too long (2000 characters max)', 'Demasiado largo (2000 caracteres máx.)');
       checkSendRate('fb:' + account.id);
       addFeedback(req, account, body.groupId && db.groups[body.groupId], { kind: ['bug', 'idea', 'other'].includes(body.kind) ? body.kind : 'other', text });
       return ok();
@@ -963,7 +990,7 @@ async function api(req, res, url) {
     }
 
     case 'GET /feedback':
-      if (!isOwner(account)) throw new HttpError(403, 'Réservé', 'Not allowed');
+      if (!isOwner(account)) throw new HttpError(403, 'Réservé', 'Not allowed', 'No permitido');
       return ok({ items: db.feedback || [] });
 
     case 'POST /feedback/:id/done': {
@@ -990,7 +1017,7 @@ async function api(req, res, url) {
   const me = g && memberIn(g, account);
   setScopeGroup(g || null);
   if (!me) {
-    const e = new HttpError(403, 'Tu ne fais pas (ou plus) partie de ce groupe', 'You’re not in this group (anymore)');
+    const e = new HttpError(403, 'Tu ne fais pas (ou plus) partie de ce groupe', 'You’re not in this group (anymore)', 'No estás (o ya no estás) en este grupo');
     e.code = 'no-group';
     throw e;
   }
@@ -1012,7 +1039,7 @@ async function api(req, res, url) {
       const channel = checkChannel(g, id);
       // Infos du sondage (pour l'en-tête, même s'il est loin dans les archives).
       const p = g.polls[channel];
-      const poll = p && { id: p.id, text: p.text, textEn: g.questions[p.questionId]?.textEn || null, setId: p.setId, endsAt: p.endsAt, ended: p.endsAt <= now };
+      const poll = p && { id: p.id, text: p.text, textEn: g.questions[p.questionId]?.textEn || null, textEs: g.questions[p.questionId]?.textEs || null, setId: p.setId, endsAt: p.endsAt, ended: p.endsAt <= now };
       if (chatLocked(g, channel, me.id)) {
         return ok({ channel, poll, locked: true, messages: [], hasMore: false, reads: {}, count: chat.list(g.id, channel).filter((m) => !m.deleted).length });
       }
@@ -1206,7 +1233,7 @@ async function api(req, res, url) {
       if (body.setId && !g.sets[body.setId]) throw new HttpError(404, 'Set introuvable');
       if (!dropsLeft(g, me.id, now)) {
         const n = dropsPerDay(g);
-        throw new HttpError(429, n ? `Tu as déjà lancé ${n} question${n > 1 ? 's' : ''} aujourd’hui. Ça repart à minuit !` : 'L’admin a désactivé les questions en plus', n ? `You already launched ${n} question${n > 1 ? 's' : ''} today. Resets at midnight!` : 'The admin turned off extra questions');
+        throw new HttpError(429, n ? `Tu as déjà lancé ${n} question${n > 1 ? 's' : ''} aujourd’hui. Ça repart à minuit !` : 'L’admin a désactivé les questions en plus', n ? `You already launched ${n} question${n > 1 ? 's' : ''} today. Resets at midnight!` : 'The admin turned off extra questions', n ? `Ya has lanzado ${n} pregunta${n > 1 ? 's' : ''} hoy. ¡Se reinicia a medianoche!` : 'El admin ha desactivado las preguntas extra');
       }
       let q;
       if (body.questionId) {
@@ -1231,13 +1258,13 @@ async function api(req, res, url) {
       const qs = Object.values(g.questions).filter((q) => q.setId === id && !q.removed);
       return ok({
         set: game.setView(g, set, me),
-        played: qs.filter((q) => q.usedAt).sort((a, b) => b.usedAt - a.usedAt).map((q) => ({ id: q.id, text: q.text, textEn: q.textEn || null, usedAt: q.usedAt })),
+        played: qs.filter((q) => q.usedAt).sort((a, b) => b.usedAt - a.usedAt).map((q) => ({ id: q.id, text: q.text, textEn: q.textEn || null, textEs: q.textEs || null, usedAt: q.usedAt })),
         mine: qs.filter((q) => !q.usedAt && q.authorId === me.id).map((q) => ({ id: q.id, text: q.text })),
       });
     }
 
     case 'POST /sets': {
-      const name = cleanText(body.name, 2, 40, 'Le nom du set', 'The set name');
+      const name = cleanText(body.name, 2, 40, 'Le nom du set', 'The set name', 'El nombre del set');
       if (Object.values(g.sets).some((s) => s.name.toLowerCase() === name.toLowerCase())) throw new HttpError(409, 'Un set porte déjà ce nom');
       const set = {
         id: 'c_' + newId(),
@@ -1258,7 +1285,7 @@ async function api(req, res, url) {
       const set = g.sets[id];
       if (!set) throw new HttpError(404, 'Set introuvable');
       if (set.builtin || (!me.isAdmin && set.authorId !== me.id)) throw new HttpError(403, 'Tu ne peux pas modifier ce set');
-      if (body.name != null) set.name = cleanText(body.name, 2, 40, 'Le nom du set', 'The set name');
+      if (body.name != null) set.name = cleanText(body.name, 2, 40, 'Le nom du set', 'The set name', 'El nombre del set');
       if (body.emoji) set.emoji = cleanEmoji(body.emoji);
       if (body.description != null) set.description = String(body.description).trim().slice(0, 120);
       if (body.spicy != null) set.spicy = !!body.spicy;
@@ -1308,17 +1335,17 @@ async function api(req, res, url) {
     case 'POST /claims/:id/approve':
     case 'POST /claims/:id/deny': {
       const c = openClaims(g, now).find((x) => x.id === id);
-      if (!c) throw new HttpError(404, 'Demande introuvable (déjà traitée ?)', 'Request not found (already handled?)');
+      if (!c) throw new HttpError(404, 'Demande introuvable (déjà traitée ?)', 'Request not found (already handled?)', 'No se encuentra la solicitud (¿ya gestionada?)');
       const aboutMe = claimTarget(g, c)?.id === me.id;
       if (route.endsWith('/deny')) {
-        if (!aboutMe && !canApprove(g, c, me)) throw new HttpError(403, 'Tu ne peux pas répondre à cette demande', 'You can’t answer this request');
+        if (!aboutMe && !canApprove(g, c, me)) throw new HttpError(403, 'Tu ne peux pas répondre à cette demande', 'You can’t answer this request', 'No puedes responder a esta solicitud');
         Object.assign(c, { status: 'denied', closedAt: now });
         c.denials.push(me.id);
         persist();
         live.emit(g.id, 'refresh', {});
         return ok({ status: c.status });
       }
-      if (!canApprove(g, c, me)) throw new HttpError(403, 'Tu ne peux pas valider cette demande', 'You can’t approve this request');
+      if (!canApprove(g, c, me)) throw new HttpError(403, 'Tu ne peux pas valider cette demande', 'You can’t approve this request', 'No puedes aprobar esta solicitud');
       if (!c.approvals.includes(me.id)) c.approvals.push(me.id);
       if (c.approvals.length >= c.needed) grantClaim(g, c, now);
       persist();
@@ -1376,7 +1403,7 @@ async function api(req, res, url) {
       return ok({ enabled: !!g.settings.profiles, items: profile.items(), mine: ((g.profiles || {})[me.id] || {}).answers || {}, summary: profile.summary(g), effects: profile.effects(g) });
 
     case 'PUT /quiz': {
-      if (!g.settings.profiles) throw new HttpError(400, 'Le questionnaire n’est pas activé dans ce groupe', 'The questionnaire isn’t on in this group');
+      if (!g.settings.profiles) throw new HttpError(400, 'Le questionnaire n’est pas activé dans ce groupe', 'The questionnaire isn’t on in this group', 'El cuestionario no está activado en este grupo');
       g.profiles ||= {};
       g.profiles[me.id] = { answers: profile.clean(body.answers), at: now };
       persist();
@@ -1386,7 +1413,7 @@ async function api(req, res, url) {
     // --- Récap du mois ---
     case 'GET /recap': {
       const month = String(url.searchParams.get('month') || recap.monthOf(now, g.settings.timezone));
-      if (!/^\d{4}-\d{2}$/.test(month)) throw new HttpError(400, 'Mois invalide', 'Invalid month');
+      if (!/^\d{4}-\d{2}$/.test(month)) throw new HttpError(400, 'Mois invalide', 'Invalid month', 'Mes no válido');
       return ok(recap.compute(g, month, me, now));
     }
 
@@ -1395,7 +1422,7 @@ async function api(req, res, url) {
     case 'POST /push/test': {
       const devices = (g.pushSubs[me.id] || []).length;
       if (!devices) return ok({ devices: 0, results: [] });
-      const results = await push.sendTo(g, me.id, { title: tr(me.lang, 'Test réussi', 'Test worked'), body: tr(me.lang, 'Les notifications marchent sur cet appareil.', 'Notifications work on this device.'), tag: 'test', url: '/' });
+      const results = await push.sendTo(g, me.id, { title: tr(me.lang, 'Test réussi', 'Test worked', 'La prueba ha funcionado'), body: tr(me.lang, 'Les notifications marchent sur cet appareil.', 'Notifications work on this device.', 'Las notificaciones funcionan en este dispositivo.'), tag: 'test', url: '/' });
       return ok({ devices, results });
     }
 
@@ -1406,7 +1433,7 @@ async function api(req, res, url) {
     // --- Admin ---
     case 'PATCH /admin/group':
       requireAdmin();
-      g.name = cleanText(body.name, 2, 40, 'Le nom du groupe', 'The group name');
+      g.name = cleanText(body.name, 2, 40, 'Le nom du groupe', 'The group name', 'El nombre del grupo');
       persist();
       return ok({ group: { name: g.name, code: g.code } });
 
@@ -1464,7 +1491,7 @@ async function api(req, res, url) {
       const user = player && player.userId && g.users[player.userId];
       const target = user && db.accounts[user.accountId];
       if (!target) throw new HttpError(404, 'Ce nom n’a pas de compte');
-      if (target.id === account.id) throw new HttpError(400, 'C’est ton propre compte : change ton PIN depuis l’accueil', 'That’s your own account: change your PIN from the home screen');
+      if (target.id === account.id) throw new HttpError(400, 'C’est ton propre compte : change ton PIN depuis l’accueil', 'That’s your own account: change your PIN from the home screen', 'Es tu propia cuenta: cambia tu PIN desde la pantalla de inicio');
       let code = '';
       for (const b of crypto.randomBytes(8)) code += RECOVERY_CHARS[b % RECOVERY_CHARS.length];
       target.recovery = { hash: sha(code), expires: now + 48 * 3600 * 1000, by: me.id };
@@ -1486,18 +1513,19 @@ async function api(req, res, url) {
     case 'PATCH /admin/settings': {
       requireAdmin();
       const s = { ...g.settings };
-      const num = (v, min, max, label, labelEn) => {
+      const num = (v, min, max, label, labelEn, labelEs) => {
         const n = Number(v);
-        if (!Number.isFinite(n) || n < min || n > max) throw new HttpError(400, `${label} doit être entre ${min} et ${max}`, `${labelEn} has to be between ${min} and ${max}`);
+        if (!Number.isFinite(n) || n < min || n > max) throw new HttpError(400, `${label} doit être entre ${min} et ${max}`, `${labelEn} has to be between ${min} and ${max}`, `${labelEs || labelEn} tiene que estar entre ${min} y ${max}`);
         return n;
       };
-      if (body.intervalHours != null) s.intervalHours = num(body.intervalHours, MIN_INTERVAL, 24, 'L’intervalle', 'The interval');
-      if (body.dropsPerDay != null) s.dropsPerDay = Math.round(num(body.dropsPerDay, 0, 10, 'Le nombre de questions en plus', 'The number of extra questions'));
+      if (body.intervalHours != null) s.intervalHours = num(body.intervalHours, MIN_INTERVAL, 24, 'L’intervalle', 'The interval', 'El intervalo');
+      if (body.dropsPerDay != null) s.dropsPerDay = Math.round(num(body.dropsPerDay, 0, 10, 'Le nombre de questions en plus', 'The number of extra questions', 'El número de preguntas extra'));
       if (body.profiles != null) s.profiles = !!body.profiles;
+      const quizTurnedOn = s.profiles && !g.settings.profiles;
       if (body.spicy != null) s.spicy = !!body.spicy;
-      if (body.startHour != null) s.startHour = Math.round(num(body.startHour, 0, 23, 'L’heure de début', 'The start hour'));
-      if (body.endHour != null) s.endHour = Math.round(num(body.endHour, 0, 23, 'L’heure de fin', 'The end hour'));
-      if (body.pollHours != null) s.pollHours = num(body.pollHours, 0.02, 168, 'La durée de vote', 'The voting time');
+      if (body.startHour != null) s.startHour = Math.round(num(body.startHour, 0, 23, 'L’heure de début', 'The start hour', 'La hora de inicio'));
+      if (body.endHour != null) s.endHour = Math.round(num(body.endHour, 0, 23, 'L’heure de fin', 'The end hour', 'La hora de fin'));
+      if (body.pollHours != null) s.pollHours = num(body.pollHours, 0.02, 168, 'La durée de vote', 'The voting time', 'La duración del voto');
       if (body.timezone != null) {
         if (!isValidTimezone(body.timezone)) throw new HttpError(400, 'Fuseau horaire inconnu');
         s.timezone = body.timezone;
@@ -1511,9 +1539,26 @@ async function api(req, res, url) {
       game.applyPollHours(g, now);
       // Nouveau planning : pas de question qui tombe d'un coup pour un créneau déjà passé.
       if (scheduleChanged) g.lastAutoSlot = Math.max(g.lastAutoSlot || 0, latestSlot(now, s));
+      // Questionnaire tout juste activé : on demande à tout le monde d'y répondre (fenêtre dans l'app + notif).
+      if (quizTurnedOn) askQuiz(g, me, now);
       persist();
       live.emit(g.id, 'refresh', {}, me.id);
       return ok({ settings: s, nextDrop: nextSlot(now, s) });
+    }
+
+    // L'admin relance le questionnaire : une fenêtre s'ouvre chez ceux qui n'ont pas répondu, avec une notif.
+    // Pas plus d'une fois toutes les 6 h (sinon ça devient du spam).
+    case 'POST /admin/quiz/remind': {
+      requireAdmin();
+      if (!g.settings.profiles) throw new HttpError(400, 'Le questionnaire n’est pas activé dans ce groupe', 'The questionnaire isn’t on in this group', 'El cuestionario no está activado en este grupo');
+      const wait = g.quizAsk ? g.quizAsk.at + 6 * 3600e3 - now : 0;
+      if (wait > 0) {
+        const h = Math.ceil(wait / 3600e3);
+        throw new HttpError(429, `Déjà demandé il y a peu : réessaie dans ${h} h`, `Already asked recently: try again in ${h}h`, `Ya se pidió hace poco: vuelve a probar en ${h} h`);
+      }
+      const sent = askQuiz(g, me, now);
+      persist();
+      return ok({ sent, quiz: quizState(g) });
     }
 
     case 'POST /admin/drop-auto': {
@@ -1545,6 +1590,7 @@ async function api(req, res, url) {
             set: g.sets[q.setId]?.name || '?',
             text: q.text,
             textEn: q.textEn || null,
+            textEs: q.textEs || null,
             custom: !q.builtin,
             weights: q.weights || null,
             ratings: notes,
@@ -1584,7 +1630,7 @@ async function api(req, res, url) {
 // Appelé chaque minute. Le soir (2 h avant la fin de la plage horaire, 21 h si elle passe minuit) : un rappel
 // à ceux dont la série d'au moins 3 jours s'arrête ce soir s'ils ne votent pas. Le 1er du mois à partir de
 // 10 h : « le récap du mois est prêt ».
-const monthLabel = (month, lang) => new Date(`${month}-15T12:00:00Z`).toLocaleDateString(lang === 'en' ? 'en-GB' : 'fr-FR', { month: 'long', timeZone: 'UTC' });
+const monthLabel = (month, lang) => new Date(`${month}-15T12:00:00Z`).toLocaleDateString({ en: 'en-GB', es: 'es-ES' }[lang] || 'fr-FR', { month: 'long', timeZone: 'UTC' });
 
 function dailyJobs(g, now = Date.now()) {
   if (!Object.keys(g.users).length) return;
@@ -1602,8 +1648,8 @@ function dailyJobs(g, now = Date.now()) {
       const mine = st.players[u.playerId];
       if (!mine || mine.current < 3 || mine.today !== false || !open.some((x) => !x.votes[u.id])) return null;
       return {
-        title: tr(u.lang, `🔥 Ta série de ${mine.current} jours`, `🔥 Your ${mine.current}-day streak`),
-        body: tr(u.lang, `Vote avant minuit pour ne pas la perdre (${g.name}).`, `Vote before midnight to keep it going (${g.name}).`),
+        title: tr(u.lang, `🔥 Ta série de ${mine.current} jours`, `🔥 Your ${mine.current}-day streak`, `🔥 Tu racha de ${mine.current} días`),
+        body: tr(u.lang, `Vote avant minuit pour ne pas la perdre (${g.name}).`, `Vote before midnight to keep it going (${g.name}).`, `Vota antes de medianoche para no perderla (${g.name}).`),
         tag: 'streak',
         url: '/',
       };
@@ -1618,8 +1664,8 @@ function dailyJobs(g, now = Date.now()) {
       const n = Object.values(g.polls).filter((x) => recap.monthOf(x.startsAt, tz) === prev && x.endsAt <= now && Object.keys(x.votes).length).length;
       if (n >= 3) {
         push.notify(g, 'polls', (u) => ({
-          title: tr(u.lang, `🎁 Le récap de ${monthLabel(prev, 'fr')} est prêt`, `🎁 Your ${monthLabel(prev, 'en')} recap is ready`),
-          body: tr(u.lang, `Tes stats et celles de ${g.name} sur tout le mois.`, `Your stats and ${g.name}’s for the whole month.`),
+          title: tr(u.lang, `🎁 Le récap de ${monthLabel(prev, 'fr')} est prêt`, `🎁 Your ${monthLabel(prev, 'en')} recap is ready`, `🎁 Ya está listo el resumen de ${monthLabel(prev, 'es')}`),
+          body: tr(u.lang, `Tes stats et celles de ${g.name} sur tout le mois.`, `Your stats and ${g.name}’s for the whole month.`, `Tus stats y las de ${g.name} de todo el mes.`),
           tag: 'recap',
           url: '/?recap=' + prev,
         }));
@@ -1670,10 +1716,10 @@ function announceRelease() {
   for (const a of Object.values(store.db.accounts)) {
     const m = membersOf(a).find(({ g, user }) => (g.pushSubs[user.id] || []).length && push.prefs(user).news);
     if (!m) continue;
-    const en = (a.lang || m.user.lang) === 'en';
-    const lines = (en ? rel.en : rel.fr).slice(0, 3).map((l) => l.replace(/^\S+\s/, '').replace(/[:：].*$/, ''));
+    const lang = i18n.lang(a.lang || m.user.lang);
+    const lines = (rel[lang] || rel.en).slice(0, 3).map((l) => l.replace(/^\S+\s/, '').replace(/[:：].*$/, ''));
     push.sendTo(m.g, m.user.id, {
-      title: (en ? '✨ What’s new: ' : '✨ Nouveautés : ') + rel.title[en ? 'en' : 'fr'],
+      title: tr(lang, '✨ Nouveautés : ', '✨ What’s new: ', '✨ Novedades: ') + (rel.title[lang] || rel.title.en),
       body: short(lines.join(' · '), 170),
       tag: 'news',
       url: '/?news=1',
@@ -1696,17 +1742,22 @@ const TYPES = {
   '.json': 'application/json',
 };
 
-// Version anglaise : même page, servie depuis /en (c'est l'adresse à partager / installer pour l'avoir en anglais).
-// La page est marquée en anglais et pointe vers un manifeste qui rouvre l'app installée sur /en.
-let indexEn = null;
-function serveIndexEn(res) {
-  if (!indexEn) {
-    indexEn = fs.readFileSync(path.join(PUBLIC_DIR, 'index.html'), 'utf8')
-      .replace('<html lang="fr">', '<html lang="en" data-lang="en">')
-      .replace('/manifest.webmanifest', '/manifest.en.webmanifest');
+// Versions anglaise et espagnole : même page, servie depuis /en ou /es (l'adresse à partager / installer pour
+// avoir l'app dans cette langue). La page est marquée dans la langue et pointe vers un manifeste qui rouvre
+// l'app installée sur /en ou /es.
+const INDEX_NAMES = { en: ['Whomst', 'Whomst'], es: ['Whomst', 'Whomst'] };
+const indexByLang = {};
+function serveIndexLang(res, lang) {
+  if (!indexByLang[lang]) {
+    const [title, short] = INDEX_NAMES[lang];
+    indexByLang[lang] = fs.readFileSync(path.join(PUBLIC_DIR, 'index.html'), 'utf8')
+      .replace('<html lang="fr">', `<html lang="${lang}" data-lang="${lang}">`)
+      .replace('/manifest.webmanifest', `/manifest.${lang}.webmanifest`)
+      .replace('<title>Whomst</title>', `<title>${title}</title>`)
+      .replace('content="Whomst"', `content="${short}"`);
   }
   res.writeHead(200, { 'Content-Type': TYPES['.html'], 'Cache-Control': 'no-cache' });
-  res.end(indexEn);
+  res.end(indexByLang[lang]);
 }
 
 // Liens d'invitation qui ouvrent directement l'app installée (iOS : Universal Links, Android : App Links).
@@ -1728,12 +1779,14 @@ function serveWellKnown(res, rel) {
 function serveStatic(res, url) {
   let rel = decodeURIComponent(url.pathname);
   if (rel.startsWith('/.well-known/') && serveWellKnown(res, rel)) return;
-  const legalPage = rel.match(/^(\/en)?\/(privacy|terms|support)\/?$/);
+  // Pages légales : en français, sinon en anglais (pas de version espagnole : /es/… donne l'anglais).
+  const legalPage = rel.match(/^(\/en|\/es)?\/(privacy|terms|support)\/?$/);
   if (legalPage) {
     res.writeHead(200, { 'Content-Type': TYPES['.html'], 'Cache-Control': 'no-cache' });
     return res.end(legal[legalPage[2]](legalPage[1] ? 'en' : 'fr'));
   }
-  if (rel === '/en' || rel.startsWith('/en/')) return serveIndexEn(res);
+  const langPath = /^\/(en|es)(\/|$)/.exec(rel);
+  if (langPath) return serveIndexLang(res, langPath[1]);
   if (rel === '/') rel = '/index.html';
   const file = path.normalize(path.join(PUBLIC_DIR, rel));
   if (!file.startsWith(PUBLIC_DIR + path.sep)) {

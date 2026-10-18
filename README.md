@@ -56,7 +56,9 @@ Dans [`mobile/`](mobile) (Capacitor) : même interface, notifications natives, b
 - **Chat** : un chat général par groupe + une discussion par sondage en cours (aperçu des 2 derniers messages sur la carte). Temps réel (Server-Sent Events) : « X écrit… », accusés de lecture, GIFs, photos, réactions (appui long, double tap = ❤️), réponses (glisser un message vers la droite), tags `@Prénom`, suppression de ses messages (l'admin peut tout supprimer). Les messages sont stockés à part (`data/chat.jsonl` ou table `quidenous_chat`), les photos aussi (`data/images/` ou table `quidenous_images`, réduites à 1280 px avant l'envoi).
 - **Couleurs** : 16 couleurs, une par personne ; chacun choisit parmi les libres dans Moi.
 - **Notifications** : bouton dans Moi (+ réglage à part pour les tags et réponses). Il faut https (ou localhost) ; sur iPhone, ajouter d'abord le site à l'écran d'accueil. Les notifs déjà vues (message lu, question votée) disparaissent du téléphone à l'ouverture de l'app.
-- **Anglais** : l'app est aussi en anglais (interface, questions intégrées, notifications). Lien en anglais : `…/en/` (ex. `…/en/?code=K7QM2P`) ; l'app installée depuis ce lien s'ouvre en anglais. Chacun peut changer de langue dans Moi (ou sur l'écran de connexion).
+- **Anglais et espagnol** : l'app existe aussi en anglais et en espagnol (interface, questions intégrées, notifications, erreurs). Liens : `…/en/` et `…/es/` (ex. `…/es/?code=K7QM2P`) ; l'app installée depuis ce lien s'ouvre dans cette langue. Chacun peut changer de langue dans Moi (ou sur l'écran de connexion). Dans le code, les textes s'écrivent `T('français', 'english', 'español')`.
+- **Récaps du mois** : façon Wrapped (défilement auto, tap pour avancer, appui long = pause, glisser vers le bas = fermer, devine la star du mois). Tous les mois passés sont dans Stats → Groupe.
+- **Questionnaire** : l'admin l'active dans Admin → Questionnaire, voit combien ont répondu, et peut demander à tout le monde d'y répondre (fenêtre dans l'app + notif, au plus une fois toutes les 6 h).
 
 ## Analyser les stats
 

@@ -7,7 +7,7 @@ const configure = require('./configure');
 
 const SRC = path.join(__dirname, '..', 'public');
 const OUT = path.join(__dirname, 'www');
-const SKIP = new Set(['sw.js', 'manifest.webmanifest', 'manifest.en.webmanifest', 'config.js']);
+const SKIP = new Set(['sw.js', 'manifest.webmanifest', 'manifest.en.webmanifest', 'manifest.es.webmanifest', 'config.js']);
 
 fs.rmSync(OUT, { recursive: true, force: true });
 fs.mkdirSync(OUT, { recursive: true });

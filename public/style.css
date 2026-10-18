@@ -2547,11 +2547,130 @@ html:has(body.noscroll) { overflow: hidden; }
 [data-theme="dark"] .sk::after { background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.05), transparent); }
 
 /* =====================================================================
+   v15 : récap façon Wrapped (lecture auto, gestes, animations), récaps anciens
+   ===================================================================== */
+.confetti { z-index: 70; }
+.story { overflow: hidden; touch-action: none; transition: background 0.6s ease, transform 0.2s ease, opacity 0.2s ease; background: var(--sg, #7b2ff7); }
+.story.closing { opacity: 0; transform: scale(0.96); }
+.story > *:not(.story-blobs) { position: relative; z-index: 1; }
+/* Formes floues qui dérivent derrière le contenu */
+.story-blobs { position: absolute; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
+.story-blobs i { position: absolute; width: 70vmax; height: 70vmax; border-radius: 50%; filter: blur(60px); opacity: 0.55; mix-blend-mode: overlay; animation: blob 14s ease-in-out infinite alternate; }
+.story-blobs i:nth-child(1) { background: #ffbe0b; top: -30vmax; left: -20vmax; }
+.story-blobs i:nth-child(2) { background: #00a8e8; bottom: -35vmax; right: -25vmax; animation-duration: 17s; animation-delay: -4s; }
+.story-blobs i:nth-child(3) { background: #ff2e88; top: 30%; left: 40%; width: 45vmax; height: 45vmax; animation-duration: 11s; animation-delay: -7s; }
+@keyframes blob { 0% { transform: translate(0, 0) scale(1); } 50% { transform: translate(8vmax, 6vmax) scale(1.15); } 100% { transform: translate(-6vmax, 10vmax) scale(0.9); } }
+.story.paused .story-blobs i { animation-play-state: paused; }
+/* Barres de progression qui se remplissent */
+.story-bars span { position: relative; overflow: hidden; background: rgba(255, 255, 255, 0.3); height: 3px; }
+.story-bars span.done, .story-bars span.on { background: rgba(255, 255, 255, 0.3); }
+.story-bars i { position: absolute; inset: 0; background: #fff; transform-origin: left; transform: scaleX(0); }
+.story-stage { flex: 1; display: flex; min-height: 0; }
+.story-slide { animation: none; }
+/* Chaque élément de la slide arrive à son tour */
+.st-anim { animation: stIn 0.6s cubic-bezier(0.2, 0.9, 0.25, 1.15) both; animation-delay: calc(var(--i, 0) * 120ms + 60ms); }
+@keyframes stIn { from { opacity: 0; transform: translateY(26px) scale(0.92); filter: blur(4px); } to { opacity: 1; transform: none; filter: none; } }
+.st-emoji.st-anim { animation-name: stPop; }
+@keyframes stPop { 0% { opacity: 0; transform: scale(0.2) rotate(-25deg); } 70% { opacity: 1; transform: scale(1.2) rotate(8deg); } 100% { transform: none; } }
+.st-big { font-variant-numeric: tabular-nums; text-shadow: 0 4px 30px rgba(0, 0, 0, 0.18); }
+.st-av.st-anim { animation-name: stAv; }
+@keyframes stAv { 0% { opacity: 0; transform: scale(0.3); } 60% { opacity: 1; transform: scale(1.12); } 100% { transform: none; } }
+.st-list .st-li { animation: stIn 0.5s cubic-bezier(0.2, 0.9, 0.25, 1.1) both; }
+.st-list .st-li:nth-child(1) { animation-delay: 0.45s; }
+.st-list .st-li:nth-child(2) { animation-delay: 0.6s; }
+.st-list .st-li:nth-child(3) { animation-delay: 0.75s; }
+.st-list .st-li:nth-child(4) { animation-delay: 0.9s; }
+.st-list .st-li:nth-child(n+5) { animation-delay: 1.05s; }
+.story.paused .st-anim, .story.paused .st-li { animation-play-state: paused; }
+/* Devine la star */
+.guess-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; width: 100%; max-width: 340px; margin-top: 16px; }
+.guess-opt { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 14px 8px; border-radius: 20px; background: rgba(255, 255, 255, 0.16); color: #fff; font-weight: 700; transition: transform 0.2s, opacity 0.3s, background 0.3s; }
+.guess-opt:active { transform: scale(0.95); }
+.guess-opt .avatar.lg { width: 70px; height: 70px; box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.9); }
+.guess-opt.right { background: #12b76a; transform: scale(1.06); animation: stPop 0.5s ease; }
+.guess-opt.wrong { background: #e5383b; animation: shake 0.4s ease; }
+.guess-opt.dim { opacity: 0.35; }
+@keyframes shake { 20%, 60% { transform: translateX(-6px); } 40%, 80% { transform: translateX(6px); } }
+.st-verdict { font-size: 1.1rem; font-weight: 700; background: rgba(0, 0, 0, 0.2); padding: 6px 14px; border-radius: 999px; }
+.st-verdict.ok { background: rgba(18, 183, 106, 0.85); }
+/* Fin : partager / revoir */
+.st-actions { display: flex; gap: 10px; margin-top: 18px; }
+.st-btn { padding: 12px 20px; border-radius: 999px; background: #fff; color: #2d1b4e; font-weight: 700; font-size: 0.95rem; }
+.st-btn.ghost { background: rgba(255, 255, 255, 0.18); color: #fff; }
+.st-btn:active { transform: scale(0.96); }
+.story-hint { transition: opacity 0.3s; }
+.story.paused .story-hint { opacity: 0; }
+/* Liste des récaps */
+.recap-card.unseen:not(.first) { border-color: var(--pink); }
+.rc-new { font-size: 0.68rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em; padding: 3px 8px; border-radius: 999px; background: var(--pink); color: #fff; flex-shrink: 0; }
+.recap-card.first .rc-new { background: #fff; color: var(--pink); }
+.recap-more { display: block; margin: 0 auto; padding: 4px 8px; }
+@media (prefers-reduced-motion: reduce) {
+  .st-anim, .st-list .st-li, .story-blobs i, .guess-opt.right, .guess-opt.wrong { animation: none !important; }
+}
+
+/* Nouveautés + signaler un bug : en haut de Moi, bien visibles */
+.about-links { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 0 0 12px; }
+.about-links .link-btn { justify-content: center; padding: 11px 10px; border-radius: 14px; background: var(--card); border: 1px solid var(--border); color: var(--text); font-weight: 600; font-size: 0.88rem; box-shadow: var(--shadow); }
+.about-links .link-btn:active { transform: scale(0.97); }
+
+/* Questionnaire : fenêtre « l'admin demande » et carte admin */
+.quiz-ask { text-align: center; padding: 6px 4px 2px; }
+.quiz-ask h2 { margin: 6px 0; font-size: 1.35rem; }
+.quiz-ask p { margin: 0 0 4px; line-height: 1.4; }
+.quiz-ask .link-btn { display: block; margin: 8px auto 0; }
+.qa-emoji { font-size: 2.6rem; animation: stPop 0.5s ease both; }
+.quiz-admin { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+.qa-row { display: flex; justify-content: space-between; font-size: 0.88rem; font-weight: 600; }
+.qa-bar { height: 8px; border-radius: 4px; background: var(--soft); overflow: hidden; margin-top: 6px; }
+.qa-bar span { display: block; height: 100%; background: var(--grad); border-radius: 4px; transition: width 0.4s; }
+
+/* Glisser pour changer d'onglet : la zone ne laisse au navigateur que le défilement vertical
+   (sinon il « prend » le geste dès qu'il est un peu en diagonale). */
+#view { touch-action: pan-y pinch-zoom; }
+
+/* Stats : flèches sur les bords pour passer d'un sous-onglet à l'autre (Profil ↔ Affinités ↔ Groupe) */
+.edge-nav {
+  position: fixed;
+  top: 50%;
+  z-index: 9;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 44px;
+  padding: 0 8px 0 4px;
+  border-radius: 0 22px 22px 0;
+  background: color-mix(in srgb, var(--card) 88%, transparent);
+  border: 1px solid var(--border);
+  border-left: 0;
+  color: var(--accent-text);
+  font-weight: 700;
+  font-size: 0.72rem;
+  box-shadow: var(--shadow);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  transform: translateY(-50%);
+  animation: fade 0.25s;
+}
+.edge-nav.prev { left: 0; }
+.edge-nav.next { right: 0; flex-direction: row-reverse; padding: 0 4px 0 8px; border-radius: 22px 0 0 22px; border-left: 1px solid var(--border); border-right: 0; }
+.edge-nav .ico-svg { width: 20px; height: 20px; flex-shrink: 0; }
+.edge-nav.prev .ico-svg { transform: rotate(90deg); }
+.edge-nav.next .ico-svg { transform: rotate(-90deg); }
+/* Le nom du sous-onglet ne s'affiche que s'il y a la place (pas par-dessus les cartes sur téléphone) */
+.edge-nav span { display: none; }
+@media (min-width: 760px) { .edge-nav span { display: inline; } }
+.edge-nav:active { transform: translateY(-50%) scale(0.94); }
+.edge-nav { color: var(--accent); }
+.edge-nav .ico-svg { width: 22px; height: 22px; stroke-width: 2.8; }
+
+/* =====================================================================
    v13 : stores (signaler, bloquer, quitter, supprimer son compte, pages légales) et app mobile
    ===================================================================== */
 .legal-line { font-size: 0.75rem; color: var(--muted); text-align: center; margin: 14px 0 0; }
 .legal-line a, .legal-links a { color: var(--muted); }
-.legal-links { margin-top: 0; font-size: 0.78rem; }
+.legal-links { display: flex; justify-content: center; flex-wrap: wrap; gap: 4px 18px; margin-top: 0; font-size: 0.78rem; }
+.legal-links a { background: none; border: 0; box-shadow: none; padding: 2px 0; }
 .danger-link { color: var(--danger) !important; }
 .leave-link { display: block; margin: 12px auto 0; font-size: 0.85rem; }
 .fb-done { opacity: 0.55; }
