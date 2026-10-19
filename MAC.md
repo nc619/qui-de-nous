@@ -73,11 +73,17 @@ Pick **one** way.
 1. GitHub → [nc619/qui-de-nous](https://github.com/nc619/qui-de-nous) → **Settings → Secrets and variables →
    Actions → New repository secret**, three times:
 
-   | Name | Value (open the file with TextEdit, copy everything) |
+   **Don't copy them from TextEdit** (it silently turns `--` into "—" and adds curly quotes). Copy each one with
+   Terminal instead: run the command, then paste (⌘V) into GitHub's "Secret" box. Replace the folder path if
+   `whomst-private` is somewhere else.
+
+   | Name | Terminal command that copies the value |
    |---|---|
-   | `ANDROID_KEYSTORE_BASE64` | content of `android-upload-key.base64.txt` |
-   | `ANDROID_KEYSTORE_PASSWORD` | the password line in `android-upload-key.txt` (just the password) |
-   | `GOOGLE_SERVICES_JSON` | content of `google-services.json` |
+   | `ANDROID_KEYSTORE_BASE64` | `pbcopy < ~/whomst-private/android-upload-key.base64.txt` |
+   | `ANDROID_KEYSTORE_PASSWORD` | `sed -n 's/^password (store and key): //p' ~/whomst-private/android-upload-key.txt \| tr -d '\n' \| pbcopy` |
+   | `GOOGLE_SERVICES_JSON` | `pbcopy < ~/whomst-private/google-services.json` |
+
+   To fix a wrong secret: open it in GitHub → **Update secret** → paste again.
 
 2. **Actions → App mobile → Run workflow** → platform **android** → Run.
 3. When it's green (~10 min): open the run → bottom → **Artifacts → android-aab** → download → unzip →

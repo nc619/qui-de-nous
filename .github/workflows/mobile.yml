@@ -52,15 +52,23 @@ jobs:
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
         run: |
-          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/upload.p12"
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | tr -d ' \r\n\t' | base64 -d > "$RUNNER_TEMP/upload.p12"
           echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/upload.p12" >> "$GITHUB_ENV"
           echo "APP_ID=$(node -p "require('./app.config.json').appId")" >> "$GITHUB_ENV"
       - name: Build (.aab signé)
         working-directory: mobile/android
         env:
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          RAW_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: upload
-        run: chmod +x gradlew && ./gradlew --no-daemon bundleRelease
+        run: |
+          # Espaces / retours à la ligne copiés par erreur : enlevés. Autre caractère bizarre (tiret long, guillemet
+          # courbe ajoutés par TextEdit…) : message clair au lieu d'une erreur de signature.
+          export ANDROID_KEYSTORE_PASSWORD="$(printf '%s' "$RAW_PASSWORD" | tr -d ' \r\n\t')"
+          if printf '%s' "$ANDROID_KEYSTORE_PASSWORD" | LC_ALL=C grep -q '[^A-Za-z0-9_-]'; then
+            echo "::error::Le secret ANDROID_KEYSTORE_PASSWORD contient un caractère inattendu (tiret long, guillemet…). Recopie-le avec la commande de MAC.md (section 3A)."
+            exit 1
+          fi
+          chmod +x gradlew && ./gradlew --no-daemon bundleRelease
       - uses: actions/upload-artifact@v4
         with:
           name: android-aab
