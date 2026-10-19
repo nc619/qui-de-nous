@@ -1,5 +1,6 @@
 # Publishing on the App Store and Google Play
-n> **Building from the Mac?** Follow [MAC.md](MAC.md): it has the exact steps for both apps.
+
+> **Building from the Mac?** Follow [MAC.md](MAC.md): it has the exact steps for both apps.
 
 The mobile app lives in [`mobile/`](mobile): the same interface as the website, packaged with
 [Capacitor](https://capacitorjs.com), plus native notifications (Firebase), haptics, the share sheet, the
