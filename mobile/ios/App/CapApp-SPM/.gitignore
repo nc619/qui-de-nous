@@ -7,3 +7,5 @@ DerivedData/
 .swiftpm/config/registries.json
 .swiftpm/xcode/package.xcworkspace/contents.xcworkspacedata
 .netrc
+# Lien vers node_modules créé par « cap sync ios » sur le Mac (chemin propre à chaque machine)
+/symlinks

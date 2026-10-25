@@ -1766,7 +1766,7 @@ function serveIndexLang(res, lang) {
 function serveWellKnown(res, rel) {
   let body = null;
   if (rel === '/.well-known/apple-app-site-association' && process.env.APPLE_APP_ID) {
-    body = { applinks: { apps: [], details: [{ appIDs: [process.env.APPLE_APP_ID], components: [{ '/': '/', '?': { code: '?*' } }, { '/': '/en/', '?': { code: '?*' } }] }] } };
+    body = { applinks: { apps: [], details: [{ appIDs: [process.env.APPLE_APP_ID], components: [{ '/': '/', '?': { code: '?*' } }, { '/': '/en/', '?': { code: '?*' } }, { '/': '/es/', '?': { code: '?*' } }] }] } };
   } else if (rel === '/.well-known/assetlinks.json' && process.env.ANDROID_PACKAGE && process.env.ANDROID_SHA256) {
     body = [{ relation: ['delegate_permission/common.handle_all_urls'], target: { namespace: 'android_app', package_name: process.env.ANDROID_PACKAGE, sha256_cert_fingerprints: process.env.ANDROID_SHA256.split(',').map((x) => x.trim()) } }];
   }

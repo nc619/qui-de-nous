@@ -193,7 +193,7 @@ deletion URL = `https://qui-de-nous-bpbr.onrender.com/support`).
 
 ### App Review notes (paste into App Store Connect → App Review Information)
 
-> No login needed. Tap "Join a group", enter the code **XXXXXX** and pick the name **Kim** (a demo group with questions, votes and
+> No login needed. Tap "Join a group", enter the code **JNMN2R** and pick the name **Kim** (a demo group with questions, votes and
 > chat history). Or tap "Create a group" to start one. Long-press a chat message to react or
 > report it; Stats → tap a person → Report / Block. Account deletion: Home (← arrow) → My account →
 > Delete my account.
