@@ -265,3 +265,72 @@ radar, the monthly recap, the streaks.
 > It's all fun between friends: built-in reporting and blocking, and the group admin stays in control.
 
 **Keywords (100 chars)**: friends,poll,vote,most likely to,party,questions,group,quiz,game,who of us
+
+---
+
+## Apple App Review: "Guideline 2.1 – Information Needed" (Oct 2026)
+
+Apple asks this of new developer accounts. Reply in App Store Connect → App Review (with the video attached), and
+paste the text below (without the video line) into **App Review Information → Notes** too, for future submissions.
+
+### Screen recording (physical iPhone, latest iOS)
+
+Record with iOS **Screen Recording** (Control Center). Start on the home screen. ~3 minutes, in this order:
+
+1. Tap the **Whomst** icon (the launch must be in the video). Welcome screen.
+2. **Join a group** → allow notifications → code **JNMN2R** → pick **Kim** → Let's go. *(This is the account
+   creation: an anonymous account is made automatically, no email or phone.)*
+3. **Live**: vote on a question → results appear. Tap **½ Not sure** on another one and split a vote.
+4. **Chat** tab → Group chat → send a message. **Long-press another member's message → Report** (pick a reason).
+5. **Stats** tab → tap a person → **Report** and **Block**. Show that the blocked person's messages are hidden.
+6. **Me** tab: name, photo, colour, notification settings.
+7. ← arrow (top left) → **Home**: **My account** → **Add a PIN** (this is the optional login) → set a username
+   and PIN. Then **Log out**, and **I already have an account** → log back in with that username + PIN.
+8. **My account → Delete my account** → confirm → back on the welcome screen. *(This also frees "Kim" again
+   for the reviewer.)*
+
+Afterwards, refresh the demo group: `node scripts/demo-group.js https://qui-de-nous-bpbr.onrender.com`.
+
+### Reply text
+
+> 1. Two screen recordings are attached, both made on a physical iPhone 16 Pro running iOS 26.3.1 and both starting
+> from the home screen with the app launch:
+> - Whomst-review-1-full-flow.mp4 (2:46): joining the demo group (this creates the anonymous account), voting,
+>   the chat, reporting a message, the profile and notification settings, the optional login (adding a username +
+>   PIN, logging out, logging back in) and account deletion.
+> - Whomst-review-2-blocking.mp4 (1:08): blocking a member (Stats → member → Block), their messages then show as
+>   "Hidden message (blocked person)" in the chat, and account deletion.
+>
+> 2. Purpose and audience: Whomst is a party game for groups of friends who know each other in real life, aged 17+.
+> A few times a day, a "Who's most likely to…" question drops in the group ("Who'd forget their own birthday?") and
+> everyone votes for one of the other members. Results, a chat for each question and light-hearted stats (streaks,
+> a monthly recap, a "personality" radar) keep the group talking. The value: a fun, low-effort way (a few seconds a
+> day) to keep a friend group laughing together, without feeds, followers or strangers. Groups are private and can
+> only be joined with an invitation code. The app is in English, French and Spanish.
+>
+> 3. How to access the main features (no sign-up or login needed):
+> - Demo group: tap "Join a group", enter the code JNMN2R and pick the name "Kim". It is a group with 7 demo members,
+>   live questions, results and chat history.
+> - Vote: Live tab → tap a name on a question. "½ Not sure" splits a vote between two people.
+> - Chat: Chat tab → Group chat. Long-press a message to react to it or report it; swipe right to reply.
+> - Report / block: long-press a message → Report, or Stats tab → tap a person → Report / Block. Reports reach the
+>   developer (in-app inbox and notification) and the group's admins, and are handled within 24 hours (content
+>   removed, user banned if needed). Blocked users' messages are hidden.
+> - Create your own group: Home (← arrow at the top left) → Create a group, then share its 6-character code.
+> - Account: an anonymous account is created automatically when you join or create a group (no email or phone
+>   number). Optional login for another phone: Home → My account → Add a PIN (username + PIN), then "I already have
+>   an account" on the other phone.
+> - Account deletion: Home → My account → Delete my account. The account, sessions, photos, questionnaire answers
+>   and notification tokens are deleted immediately.
+> - There is no paid content, no in-app purchase and no advertising.
+>
+> 4. External services: Render (hosting of our server, EU), Neon (managed PostgreSQL database), Apple Push
+> Notification service through Google Firebase Cloud Messaging (push notifications), Giphy (GIF search in the chat:
+> only the search words are sent) and Google Fonts (the app's font). No third-party login, no payment processor,
+> no analytics or advertising SDK, no AI service.
+>
+> 5. The app works the same in all regions. Only the language changes (English, French or Spanish, switchable in the
+> app). There is no region-specific feature or content.
+>
+> 6. Not applicable: the app is not in a regulated industry and uses no protected third-party material. The
+> questions are original content written by us; GIFs come from Giphy's public API under its terms.
